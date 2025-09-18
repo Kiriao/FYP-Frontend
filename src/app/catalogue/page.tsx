@@ -798,7 +798,7 @@ export default function DiscoverPage() {
               )}
 
               {/* External links */}
-              {["admin", "user"].includes(role?.toLowerCase()) && (
+{/*               {["admin", "user"].includes(role?.toLowerCase()) && (
                 <>
                   {isBook(selectedItem) && bestBookUrl(selectedItem) && (
                     <a
@@ -811,9 +811,9 @@ export default function DiscoverPage() {
                     </a>
                   )}
                 </>
-              )}
+              )} */}
 
-              {["admin", "user"].includes(role?.toLowerCase()) && (
+{/*               {["admin", "user"].includes(role?.toLowerCase()) && (
                 <>
                   {isVideo(selectedItem) && (
                     <a
@@ -826,7 +826,7 @@ export default function DiscoverPage() {
                     </a>
                   )}
                 </>
-              )}
+              )} */}
             </div>
 
             {/* Reviews */}
