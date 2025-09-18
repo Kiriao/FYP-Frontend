@@ -35,10 +35,9 @@ export default function FavouritesPage() {
   if (!user) {
     return <p className="p-6">Please log in to view your favourites.</p>;
   }
-const books = favourites.filter((f) => f.type === 'book' || f.type === 'collection');
-const videos = favourites.filter((f) => f.type === 'video' || f.type === 'collection-videos');
 
-
+  const books = favourites.filter((f) => f.type === "book");
+  const videos = favourites.filter((f) => f.type === "video");
 
   return (
     <main className="bg-white">

@@ -1,3 +1,4 @@
+// src/types/dialogflow.d.ts
 import type * as React from "react";
 
 declare global {
@@ -7,7 +8,7 @@ declare global {
         React.HTMLAttributes<HTMLElement>,
         HTMLElement
       > & {
-        "agent-id": string;       // required
+        "agent-id": string;
         "chat-title"?: string;
         "intent"?: string;
         "language-code"?: string;

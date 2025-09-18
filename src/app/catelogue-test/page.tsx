@@ -83,18 +83,6 @@ type ContentItem = {
   filename: string;
 };
 
-type FavouriteType = 'book' | 'video' | 'collection' | 'collection-videos';
-
-interface Favourite {
-  id: string;
-  type: FavouriteType;
-  title: string;
-  thumbnail?: string;
-  authors?: string[];
-  channel?: string;
-  infoLink?: string;
-}
-
 
 const FALLBACK_THUMB = '/images/book-placeholder.png';
 
@@ -323,39 +311,30 @@ const fetchCollectionVideos = async () => {
     setFavourites(favs);
   }
 
-function isFavourite(id: string, type: FavouriteType) {
-  return favourites.some((f) => f.id === id && f.type === type);
-}
-
-
-async function toggleFavourite(item: Book | Video | ContentItem, type: FavouriteType) {
-  if (!user) return alert('Please log in to favourite items.');
-
-  // Determine favourite type based on mode
-  let favType: FavouriteType = type;
-  if (mode === 'collection') favType = 'collection';
-  if (mode === 'collection-videos') favType = 'collection-videos';
-
-  const key = (item as any).id;
-  const exists = favourites.find((f) => f.id === key && f.type === favType);
-  const ref = doc(db, 'users', user.uid, 'favourites', key);
-
-  if (exists) {
-    await deleteDoc(ref);
-    setFavourites(favourites.filter((f) => !(f.id === key && f.type === favType)));
-  } else {
-    const newFav: Favourite = { id: key, type: favType, title: (item as any).title || '' };
-    if ((item as any).thumbnail) newFav.thumbnail = (item as any).thumbnail;
-    if ('authors' in item && item.authors) newFav.authors = item.authors;
-    if ('channel' in item && item.channel) newFav.channel = item.channel;
-    if ('infoLink' in item && item.infoLink) newFav.infoLink = item.infoLink;
-
-    await setDoc(ref, newFav);
-    setFavourites([...favourites, newFav]);
+  function isFavourite(id: string, type: 'book' | 'video') {
+    return favourites.some((f) => f.id === id && f.type === type);
   }
-}
 
+  async function toggleFavourite(item: Book | Video, type: 'book' | 'video') {
+    if (!user) return alert('Please log in to favourite items.');
+    const key = getItemId(item);
+    const exists = favourites.find((f) => f.id === key && f.type === type);
+    const ref = doc(db, 'users', user.uid, 'favourites', key);
 
+    if (exists) {
+      await deleteDoc(ref);
+      setFavourites(favourites.filter((f) => !(f.id === key && f.type === type)));
+    } else {
+      const newFav: any = { id: key, type, title: (item as any).title || '' };
+      if ((item as any).thumbnail) newFav.thumbnail = (item as any).thumbnail;
+      if (isBook(item) && item.authors) newFav.authors = item.authors;
+      if (isVideo(item) && item.channel) newFav.channel = item.channel;
+      if (isBook(item) && item.infoLink) newFav.infoLink = item.infoLink;
+
+      await setDoc(ref, newFav);
+      setFavourites([...favourites, newFav]);
+    }
+  }
 
   async function submitReview() {
     if (!user || !selectedItem) return;
@@ -895,34 +874,14 @@ useEffect(() => {
             <div className="flex flex-col gap-2 mb-3">
               {user && (
                 <>
-                <button
-                  onClick={() =>
-                    toggleFavourite(selectedItem, 
-                      mode === 'books'
-                        ? 'book'
-                        : mode === 'videos'
-                        ? 'video'
-                        : mode === 'collection'
-                        ? 'collection'
-                        : 'collection-videos'
-                    )
-                  }
-                  className="px-3 py-1 rounded-lg border"
-                >
-                  {isFavourite(
-                    getItemId(selectedItem),
-                    mode === 'books'
-                      ? 'book'
-                      : mode === 'videos'
-                      ? 'video'
-                      : mode === 'collection'
-                      ? 'collection'
-                      : 'collection-videos'
-                  )
-                    ? '★ Remove Favourite'
-                    : '☆ Add Favourite'}
-                </button>
-
+                  <button
+                    onClick={() => toggleFavourite(selectedItem, mode === 'books' ? 'book' : 'video')}
+                    className="px-3 py-1 rounded-lg border"
+                  >
+                    {isFavourite(getItemId(selectedItem), mode === 'books' ? 'book' : 'video')
+                      ? '★ Remove Favourite'
+                      : '☆ Add Favourite'}
+                  </button>
                   <button onClick={handleLeaveReview} className="px-3 py-1 rounded-lg border text-green-600">
                     Leave Review
                   </button>

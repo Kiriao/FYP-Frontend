@@ -200,24 +200,22 @@ export default function GitHubManager() {
             />
 
             {/* Categories as checkboxes */}
-              <div>
-                <p className="font-medium text-gray-800 mb-2">Categories:</p>
-                <div className="flex flex-wrap gap-2">
-                  {availableCategories.map((cat) => (
-                    <label
-                      key={cat}
-                      onClick={() => toggleCategory(cat)}
-                      className={`px-3 py-1 border rounded-md cursor-pointer transition ${
-                        formData.categories?.includes(cat)
-                          ? "bg-pink-600 text-white border-pink-600"
-                          : "bg-gray-200 text-gray-800 border-gray-300 hover:bg-gray-300"
-                      }`}
-                    >
-                      {cat}
-                    </label>
-                  ))}
-                </div>
+            <div>
+              <p className="font-medium text-gray-800 mb-2">Categories:</p>
+              <div className="flex flex-wrap gap-2">
+                {availableCategories.map((cat) => (
+                  <label key={cat} className="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.categories?.includes(cat)}
+                      onChange={() => toggleCategory(cat)}
+                      className="w-4 h-4"
+                    />
+                    <span className="text-gray-800">{cat}</span>
+                  </label>
+                ))}
               </div>
+            </div>
 
             <textarea
               value={formData.synopsis || ""}

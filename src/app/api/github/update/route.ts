@@ -1,3 +1,4 @@
+// app/api/github/update/route.ts
 import { NextResponse } from "next/server";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN!;
@@ -6,13 +7,6 @@ const BRANCH = "main";
 
 export async function POST(req: Request) {
   try {
-    if (!GITHUB_TOKEN) {
-      return NextResponse.json(
-        { error: "Missing GitHub token" },
-        { status: 500 }
-      );
-    }
-
     const { category, filename, content, sha } = await req.json();
 
     const encoded = Buffer.from(
@@ -32,20 +26,13 @@ export async function POST(req: Request) {
         message: `Update ${filename}`,
         branch: BRANCH,
         content: encoded,
-        sha,
+        sha, // 👈 required
       }),
     });
 
-    const text = await res.text();
-
-    if (!res.ok) {
-      return NextResponse.json(
-        { error: `GitHub error: ${res.status}`, details: text },
-        { status: res.status }
-      );
-    }
-
-    return NextResponse.json(JSON.parse(text));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message);
+    return NextResponse.json(data);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
