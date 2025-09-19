@@ -17,14 +17,16 @@ interface Book {
   title: string;
   authors: string[];
   categories: string[];
+  maturityRating: string;
   thumbnail?: string;
   previewLink?: string;
   canonicalVolumeLink?: string;
   infoLink?: string;
   bestLink?: string;
+  description?: string | null;
   synopsis?: string;
+  snippet?: string;
   buckets?: string[];
-  link: string;
 }
 
 interface Video {
@@ -35,7 +37,6 @@ interface Video {
   thumbnail?: string;
   publishedAt: string;
   url?: string;
-  link: string; 
   categoryHint: number;
 }
 
@@ -65,14 +66,8 @@ interface Review {
   createdAt: Timestamp;
 }
 
-// Our Collection state (from GitHub)
-interface FileItem {
-  name: string;
-  path: string;
-  sha: string;
-}
-
-type ContentItem = {
+// New type for collection items
+interface ContentItem {
   id: string;
   title: string;
   authors: string[];
@@ -81,10 +76,13 @@ type ContentItem = {
   thumbnail: string;
   link: string;
   filename: string;
-};
-
+}
 
 const FALLBACK_THUMB = '/images/book-placeholder.png';
+
+const stripTags = (s: string) => s.replace(/<[^>]+>/g, '');
+const fmtDate = (iso?: string) =>
+  iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
 
 const bucketDisplayNames = {
   juvenile_fiction: 'Fiction',
@@ -99,17 +97,23 @@ const bucketDisplayNames = {
   young_adult: 'Young Adult',
 };
 
+// labels for the video shelves (used for chips)
+const videoBucketDisplayNames = {
+  stories:  'Stories',
+  songs:    'Songs & Rhymes',
+  learning: 'Learning',
+  science:  'Science',
+  math:     'Math',
+  animals:  'Animals',
+  artcraft: 'Art & Crafts',
+} as const;
+
 export default function DiscoverPage() {
   // State
-  const [mode, setMode] = useState<'books' | 'videos' | 'collection' | 'collection-videos'>('books');
+  const [mode, setMode] = useState<'books' | 'videos' | 'collection-books' | 'collection-videos'>('books');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [role, setRole] = useState<string>("");
-  // Collection state
-const [collectionItems, setCollectionItems] = useState<ContentItem[]>([]);
-const [collectionCategory, setCollectionCategory] = useState<"books" | "videos">("books");
-const [collectionVideos, setCollectionVideos] = useState<ContentItem[]>([]);
-const [collectionVideoCategory, setCollectionVideoCategory] = useState<"books" | "videos">("videos");
 
   // Books state
   const [books, setBooks] = useState<Book[]>([]);
@@ -119,11 +123,15 @@ const [collectionVideoCategory, setCollectionVideoCategory] = useState<"books" |
   const [totalApprox, setTotalApprox] = useState<number | null>(null);
 
   // Videos state
+  const [videoBucket, setVideoBucket] = useState<keyof typeof videoBucketDisplayNames>('stories');
   const [videos, setVideos] = useState<Video[]>([]);
   const [videosPage, setVideosPage] = useState(1);
   const [videosHasMore, setVideosHasMore] = useState(false);
 
-  const [files, setFiles] = useState<FileItem[]>([]);
+  // Collection state
+  const [collectionItems, setCollectionItems] = useState<ContentItem[]>([]);
+  const [filteredCollectionItems, setFilteredCollectionItems] = useState<ContentItem[]>([]);
+  const [collectionMessage, setCollectionMessage] = useState<string | null>(null);
 
   const pageSize = 20;
 
@@ -131,14 +139,27 @@ const [collectionVideoCategory, setCollectionVideoCategory] = useState<"books" |
   const [user, setUser] = useState<User | null>(null);
   const [favourites, setFavourites] = useState<any[]>([]);
   const [reviewsMap, setReviewsMap] = useState<Record<string, Review[]>>({});
-  const [selectedItem, setSelectedItem] = useState<Book | Video | null>(null);
+  const [selectedItem, setSelectedItem] = useState<Book | Video | ContentItem | null>(null);
   const [reviewContent, setReviewContent] = useState('');
   const reviewRef = useRef<HTMLTextAreaElement | null>(null);
 
+  // Book preview toggle (must be inside component)
+  const [showPreview, setShowPreview] = useState(false);
+  useEffect(() => { setShowPreview(false); }, [selectedItem]);
+
   // Type guards & helpers
-  const isBook = (item: Book | Video): item is Book => (item as any).id !== undefined;
-  const isVideo = (item: Book | Video): item is Video => (item as any).videoId !== undefined;
-  const getItemId = (item: Book | Video) => (isBook(item) ? item.id : item.videoId);
+  const isBook = (item: Book | Video | ContentItem): item is Book => 
+    (item as any).id !== undefined && (item as any).videoId === undefined && (item as any).filename === undefined;
+  const isVideo = (item: Book | Video | ContentItem): item is Video => 
+    (item as any).videoId !== undefined;
+  const isContentItem = (item: Book | Video | ContentItem): item is ContentItem => 
+    (item as any).filename !== undefined;
+  const getItemId = (item: Book | Video | ContentItem) => {
+    if (isBook(item)) return item.id;
+    if (isVideo(item)) return item.videoId;
+    if (isContentItem(item)) return item.id;
+    return '';
+  };
 
   // Helper functions
   const bestBookUrl = (book: Book): string | null => {
@@ -159,6 +180,61 @@ const [collectionVideoCategory, setCollectionVideoCategory] = useState<"books" |
       reviewRef.current?.scrollIntoView({ behavior: 'smooth' });
       reviewRef.current?.focus();
     }, 100);
+  };
+
+  // Collection API calls
+  const fetchCollectionItems = async (category: 'books' | 'videos') => {
+    setLoading(true);
+    setCollectionMessage(null);
+
+    try {
+      const res = await fetch(`/api/github/list-files?category=${category}`);
+      const files: { name: string; path: string }[] = await res.json();
+
+      // Fetch file content for each
+      const contentPromises = files.map(async (file) => {
+        const r = await fetch(`/api/github/get-file?path=${encodeURIComponent(file.path)}`);
+        const data = await r.json();
+        return {
+          id: data.id || file.name, // fallback to filename if id missing
+          title: data.title || "No Title",
+          authors: data.authors || [],
+          categories: data.categories || [],
+          synopsis: data.synopsis || "",
+          thumbnail: data.thumbnail || "",
+          link: data.link || "#",
+          filename: file.name,
+        };
+      });
+
+      const results = await Promise.all(contentPromises);
+      setCollectionItems(results);
+      setFilteredCollectionItems(results);
+    } catch (err: any) {
+      console.error(err);
+      setCollectionMessage("❌ Failed to fetch items: " + err.message);
+      setCollectionItems([]);
+      setFilteredCollectionItems([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter collection items based on search query
+  const filterCollectionItems = () => {
+    if (!searchQuery.trim()) {
+      setFilteredCollectionItems(collectionItems);
+      return;
+    }
+
+    const query = searchQuery.toLowerCase();
+    const filtered = collectionItems.filter(item => 
+      item.title.toLowerCase().includes(query) ||
+      item.authors.some(author => author.toLowerCase().includes(query)) ||
+      item.categories.some(cat => cat.toLowerCase().includes(query)) ||
+      item.synopsis.toLowerCase().includes(query)
+    );
+    setFilteredCollectionItems(filtered);
   };
 
   // API calls
@@ -190,109 +266,49 @@ const [collectionVideoCategory, setCollectionVideoCategory] = useState<"books" |
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      params.set('q', searchQuery.trim() || 'stories for kids');
+      if (searchQuery.trim()) params.set('q', searchQuery.trim());
+      params.set('bucket', String(videoBucket));
       params.set('page', String(videosPage));
       params.set('pageSize', String(pageSize));
 
-      const response = await fetch(`/api/videos?${params.toString()}`);
-      const data: VideosResponse = await response.json();
+      const res = await fetch(`/api/videos?${params.toString()}`);
+      const data: VideosResponse = await res.json();
 
-      setVideos(data.items || []);
+      setVideos(Array.isArray(data.items) ? data.items : []);
       setVideosHasMore(!!data.hasMore);
-    } catch (error) {
-      console.error('Videos search failed:', error);
+    } catch (err) {
+      console.error('Videos search failed:', err);
       setVideos([]);
+      setVideosHasMore(false);
     } finally {
       setLoading(false);
     }
   };
 
-const fetchCollection = async () => {
-  setLoading(true);
-  try {
-    const res = await fetch(`/api/github/list-files?category=${collectionCategory}`);
-    const files: { name: string; path: string }[] = await res.json();
-
-    const contentPromises = files.map(async (file) => {
-      const r = await fetch(`/api/github/get-file?path=${encodeURIComponent(file.path)}`);
-      const data = await r.json();
-      return {
-        id: data.id || file.name,
-        title: data.title || "No Title",
-        authors: data.authors || [],
-        categories: data.categories || [],
-        synopsis: data.synopsis || "",
-        thumbnail: data.thumbnail || "",
-        link: data.link || "#",
-        filename: file.name,
-      };
-    });
-
-    const results = await Promise.all(contentPromises);
-    setCollectionItems(results);
-  } catch (err: any) {
-    console.error(err);
-  } finally {
-    setLoading(false);
-  }
-};
-
-const fetchCollectionVideos = async () => {
-  setLoading(true);
-  try {
-    const res = await fetch(`/api/github/list-files?category=videos`);
-    const files: { name: string; path: string }[] = await res.json();
-
-    const contentPromises = files.map(async (file) => {
-      const r = await fetch(`/api/github/get-file?path=${encodeURIComponent(file.path)}`);
-      const data = await r.json();
-      return {
-        id: data.id || file.name,
-        title: data.title || "No Title",
-        authors: data.authors || [],
-        categories: data.categories || [],
-        synopsis: data.synopsis || "",
-        thumbnail: data.thumbnail || "",
-        link: data.link || "#",
-        filename: file.name,
-      };
-    });
-
-    const results = await Promise.all(contentPromises);
-    setCollectionVideos(results);
-  } catch (err: any) {
-    console.error(err);
-  } finally {
-    setLoading(false);
-  }
-};
-
-
-
   useEffect(() => {
-  const unsub = onAuthStateChanged(auth, async (u) => {
-    setUser(u);
-    if (u) {
-      try {
-        const snap = await getDoc(doc(db, "users", u.uid));
-        if (snap.exists()) {
-          const data = snap.data();
-          setRole(data.role || "");  // 👈 set role here
-        } else {
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      if (u) {
+        try {
+          const snap = await getDoc(doc(db, "users", u.uid));
+          if (snap.exists()) {
+            const data = snap.data();
+            setRole(data.role || "");
+          } else {
+            setRole("");
+          }
+          loadFavourites(u.uid);
+        } catch (err) {
+          console.error("Failed to load user role:", err);
           setRole("");
         }
-        loadFavourites(u.uid);
-      } catch (err) {
-        console.error("Failed to load user role:", err);
+      } else {
         setRole("");
+        setFavourites([]);
       }
-    } else {
-      setRole("");
-      setFavourites([]);
-    }
-  });
-  return () => unsub();
-}, []);
+    });
+    return () => unsub();
+  }, []);
 
   // Favourites & Reviews & Reports
   useEffect(() => {
@@ -315,7 +331,7 @@ const fetchCollectionVideos = async () => {
     return favourites.some((f) => f.id === id && f.type === type);
   }
 
-  async function toggleFavourite(item: Book | Video, type: 'book' | 'video') {
+  async function toggleFavourite(item: Book | Video | ContentItem, type: 'book' | 'video') {
     if (!user) return alert('Please log in to favourite items.');
     const key = getItemId(item);
     const exists = favourites.find((f) => f.id === key && f.type === type);
@@ -327,9 +343,9 @@ const fetchCollectionVideos = async () => {
     } else {
       const newFav: any = { id: key, type, title: (item as any).title || '' };
       if ((item as any).thumbnail) newFav.thumbnail = (item as any).thumbnail;
-      if (isBook(item) && item.authors) newFav.authors = item.authors;
-      if (isVideo(item) && item.channel) newFav.channel = item.channel;
-      if (isBook(item) && item.infoLink) newFav.infoLink = item.infoLink;
+      if ((isBook(item) || isContentItem(item)) && (item as any).authors) newFav.authors = (item as any).authors;
+      if (isVideo(item) && (item as Video).channel) newFav.channel = (item as Video).channel;
+      if (isBook(item) && (item as Book).infoLink) newFav.infoLink = (item as Book).infoLink;
 
       await setDoc(ref, newFav);
       setFavourites([...favourites, newFav]);
@@ -339,11 +355,12 @@ const fetchCollectionVideos = async () => {
   async function submitReview() {
     if (!user || !selectedItem) return;
     const key = getItemId(selectedItem);
+    const itemType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
     await addDoc(collection(db, 'books-video-reviews'), {
       userId: user.uid,
       userName: user.displayName || 'Anonymous',
       itemId: key,
-      type: mode === 'books' ? 'book' : 'video',
+      type: itemType,
       title: (selectedItem as any).title,
       content: reviewContent,
       createdAt: Timestamp.now(),
@@ -378,7 +395,7 @@ const fetchCollectionVideos = async () => {
     alert('Review reported. Admin will check it.');
   }
 
-  async function reportContent(item: Book | Video, type: 'book' | 'video') {
+  async function reportContent(item: Book | Video | ContentItem, type: 'book' | 'video') {
     if (!user) return alert('Please log in to report content.');
     const reason = prompt('Why are you reporting this content? (optional)');
     if (reason === null) return;
@@ -393,16 +410,24 @@ const fetchCollectionVideos = async () => {
     alert('Content reported. Admin will review it.');
   }
 
-  // Effects
-useEffect(() => {
-  if (mode === "books") searchBooks();
-  if (mode === "videos") searchVideos();
-  if (mode === "collection") fetchCollection();
-  if (mode === "collection-videos") fetchCollectionVideos();
-}, [mode, booksPage, videosPage, bucket, collectionCategory, collectionVideoCategory]);
+  useEffect(() => {
+    if (mode === 'books') {
+      searchBooks();
+    } else if (mode === 'videos') {
+      searchVideos();
+    } else if (mode === 'collection-books') {
+      fetchCollectionItems('books');
+    } else if (mode === 'collection-videos') {
+      fetchCollectionItems('videos');
+    }
+  }, [mode, booksPage, videosPage, bucket, videoBucket]);
 
-
-
+  // Filter collection items when search query changes for collection modes
+  useEffect(() => {
+    if (mode === 'collection-books' || mode === 'collection-videos') {
+      filterCollectionItems();
+    }
+  }, [searchQuery, collectionItems, mode]);
 
   // Initial search
   useEffect(() => {
@@ -422,16 +447,19 @@ useEffect(() => {
     setVideosPage(1);
     if (mode === 'books') {
       searchBooks();
-    } else {
+    } else if (mode === 'videos') {
       searchVideos();
+    } else if (mode === 'collection-books' || mode === 'collection-videos') {
+      filterCollectionItems();
     }
   };
 
-  const handleModeChange = (newMode: 'books' | 'videos' | 'collection' | 'collection-videos') => {
+  const handleModeChange = (newMode: 'books' | 'videos' | 'collection-books' | 'collection-videos') => {
     setMode(newMode);
+    setSearchQuery(''); // Clear search when switching modes
     if (newMode === 'books') {
       setBooksPage(1);
-    } else {
+    } else if (newMode === 'videos') {
       setVideosPage(1);
     }
   };
@@ -447,6 +475,11 @@ useEffect(() => {
     }
   };
 
+  const handleVideoBucketChange = (newBucket: keyof typeof videoBucketDisplayNames) => {
+    setVideoBucket(newBucket);
+    setVideosPage(1);
+  };
+
   // Pagination components
   const BooksPagination = () => {
     const totalPages = totalApprox ? Math.max(1, Math.ceil(totalApprox / pageSize)) : null;
@@ -459,33 +492,19 @@ useEffect(() => {
     const end = totalPages ? Math.min(totalPages, start + windowSize - 1) : booksPage + half;
 
     const pages = [] as number[];
-    for (let i = start; i <= end; i++) {
-      pages.push(i);
-    }
+    for (let i = start; i <= end; i++) pages.push(i);
 
     return (
       <div className="flex items-center justify-center gap-2 mt-6 flex-wrap">
-        <button
-          onClick={() => setBooksPage(1)}
-          disabled={booksPage === 1}
-          className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-        >
+        <button onClick={() => setBooksPage(1)} disabled={booksPage === 1} className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50">
           <ChevronsLeft className="w-4 h-4" />
         </button>
-        <button
-          onClick={() => setBooksPage(Math.max(1, booksPage - 1))}
-          disabled={booksPage === 1}
-          className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-        >
+        <button onClick={() => setBooksPage(Math.max(1, booksPage - 1))} disabled={booksPage === 1} className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50">
           <ChevronLeft className="w-4 h-4" />
         </button>
 
         {start > 1 && (
-          <button
-            onClick={() => setBooksPage(Math.max(1, booksPage - windowSize))}
-            className="px-3 py-2 border rounded-lg hover:bg-gray-50"
-            title="Jump back"
-          >
+          <button onClick={() => setBooksPage(Math.max(1, booksPage - windowSize))} className="px-3 py-2 border rounded-lg hover:bg-gray-50" title="Jump back">
             <MoreHorizontal className="w-4 h-4" />
           </button>
         )}
@@ -494,36 +513,22 @@ useEffect(() => {
           <button
             key={pageNum}
             onClick={() => setBooksPage(pageNum)}
-            className={`px-3 py-2 border rounded-lg ${
-              pageNum === booksPage ? 'bg-black text-white border-black' : 'hover:bg-gray-50'
-            }`}
+            className={`px-3 py-2 border rounded-lg ${pageNum === booksPage ? 'bg-black text-white border-black' : 'hover:bg-gray-50'}`}
           >
             {pageNum}
           </button>
         ))}
 
         {(totalPages ? end < totalPages : booksHasMore) && (
-          <button
-            onClick={() => setBooksPage(booksPage + windowSize)}
-            className="px-3 py-2 border rounded-lg hover:bg-gray-50"
-            title="Jump ahead"
-          >
+          <button onClick={() => setBooksPage(booksPage + windowSize)} className="px-3 py-2 border rounded-lg hover:bg-gray-50" title="Jump ahead">
             <MoreHorizontal className="w-4 h-4" />
           </button>
         )}
 
-        <button
-          onClick={() => setBooksPage(booksPage + 1)}
-          disabled={totalPages ? booksPage >= totalPages : !booksHasMore}
-          className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-        >
+        <button onClick={() => setBooksPage(booksPage + 1)} disabled={totalPages ? booksPage >= totalPages : !booksHasMore} className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50">
           <ChevronRight className="w-4 h-4" />
         </button>
-        <button
-          onClick={() => totalPages && setBooksPage(totalPages)}
-          disabled={!totalPages || booksPage === totalPages}
-          className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-        >
+        <button onClick={() => totalPages && setBooksPage(totalPages)} disabled={!totalPages || booksPage === totalPages} className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50">
           <ChevronsRight className="w-4 h-4" />
         </button>
       </div>
@@ -536,24 +541,14 @@ useEffect(() => {
     const end = videosPage + windowSize - 1;
 
     const pages = [] as number[];
-    for (let i = start; i <= end; i++) {
-      pages.push(i);
-    }
+    for (let i = start; i <= end; i++) pages.push(i);
 
     return (
       <div className="flex items-center justify-center gap-2 mt-6 flex-wrap">
-        <button
-          onClick={() => setVideosPage(1)}
-          disabled={videosPage === 1}
-          className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-        >
+        <button onClick={() => setVideosPage(1)} disabled={videosPage === 1} className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50">
           <ChevronsLeft className="w-4 h-4" />
         </button>
-        <button
-          onClick={() => setVideosPage(Math.max(1, videosPage - 1))}
-          disabled={videosPage === 1}
-          className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-        >
+        <button onClick={() => setVideosPage(Math.max(1, videosPage - 1))} disabled={videosPage === 1} className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50">
           <ChevronLeft className="w-4 h-4" />
         </button>
 
@@ -561,33 +556,54 @@ useEffect(() => {
           <button
             key={pageNum}
             onClick={() => setVideosPage(pageNum)}
-            className={`px-3 py-2 border rounded-lg ${
-              pageNum === videosPage ? 'bg-black text-white border-black' : 'hover:bg-gray-50'
-            }`}
+            className={`px-3 py-2 border rounded-lg ${pageNum === videosPage ? 'bg-black text-white border-black' : 'hover:bg-gray-50'}`}
           >
             {pageNum}
           </button>
         ))}
 
         {videosHasMore && (
-          <button
-            onClick={() => setVideosPage(videosPage + windowSize)}
-            className="px-3 py-2 border rounded-lg hover:bg-gray-50"
-            title="Jump ahead"
-          >
+          <button onClick={() => setVideosPage(videosPage + windowSize)} className="px-3 py-2 border rounded-lg hover:bg-gray-50" title="Jump ahead">
             <MoreHorizontal className="w-4 h-4" />
           </button>
         )}
 
-        <button
-          onClick={() => setVideosPage(videosPage + 1)}
-          disabled={!videosHasMore}
-          className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-        >
+        <button onClick={() => setVideosPage(videosPage + 1)} disabled={!videosHasMore} className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50">
           <ChevronRight className="w-4 h-4" />
         </button>
       </div>
     );
+  };
+
+  // Get current items to display
+  const getCurrentItems = () => {
+    switch (mode) {
+      case 'books':
+        return books;
+      case 'videos':
+        return videos;
+      case 'collection-books':
+      case 'collection-videos':
+        return filteredCollectionItems;
+      default:
+        return [];
+    }
+  };
+
+  // Get search placeholder text
+  const getSearchPlaceholder = () => {
+    switch (mode) {
+      case 'books':
+        return "Search titles/topics (optional) e.g. dinosaurs, space…";
+      case 'videos':
+        return "Search video titles/topics (optional) e.g. animals, math…";
+      case 'collection-books':
+        return "Search our book collection by title, author, or category…";
+      case 'collection-videos':
+        return "Search our video collection by title, author, or category…";
+      default:
+        return "Search…";
+    }
   };
 
   return (
@@ -603,7 +619,7 @@ useEffect(() => {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Search titles/topics (optional) e.g. dinosaurs, space…"
+              placeholder={getSearchPlaceholder()}
               className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
@@ -618,65 +634,41 @@ useEffect(() => {
         </div>
 
         {/* Mode Tabs */}
-        <div className="flex gap-2 mb-4">
+        <div className="flex gap-2 mb-4 flex-wrap">
           <button
             onClick={() => handleModeChange('books')}
-            className={`px-4 py-2 rounded-lg ${
-              mode === 'books' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
+            className={`px-4 py-2 rounded-lg ${mode === 'books' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
           >
             Books
           </button>
           <button
             onClick={() => handleModeChange('videos')}
-            className={`px-4 py-2 rounded-lg ${
-              mode === 'videos' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
+            className={`px-4 py-2 rounded-lg ${mode === 'videos' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
           >
             Videos
           </button>
           <button
-  onClick={() => handleModeChange('collection')}
-  className={`px-4 py-2 rounded-lg ${
-    mode === "collection"
-      ? "bg-black text-white"
-      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-  }`}
->
-  Our Book Collection
-</button> 
-
-<button
-  onClick={() => handleModeChange('collection-videos')}
-  className={`px-4 py-2 rounded-lg ${
-    mode === "collection-videos"
-      ? "bg-black text-white"
-      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-  }`}
->
-  Our Video Collection
-</button>
-
+            onClick={() => handleModeChange('collection-books')}
+            className={`px-4 py-2 rounded-lg ${mode === 'collection-books' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          >
+            Our Collection Books
+          </button>
+{/*           <button
+            onClick={() => handleModeChange('collection-videos')}
+            className={`px-4 py-2 rounded-lg ${mode === 'collection-videos' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          >
+            Our Video Collection
+          </button> */}
         </div>
 
-        {/* Category Shelves - Only for Books */}
-        {mode === 'books' && (
+        {/* Video chips - only show for external videos */}
+        {mode === 'videos' && (
           <div className="flex flex-wrap gap-2 mb-6">
-            <button
-              onClick={() => handleBucketChange('')}
-              className={`px-3 py-1.5 rounded-full text-sm border ${
-                bucket === '' ? 'bg-black text-white border-black' : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
-              }`}
-            >
-              All
-            </button>
-            {Object.entries(bucketDisplayNames).map(([key, label]) => (
+            {Object.entries(videoBucketDisplayNames).map(([key, label]) => (
               <button
                 key={key}
-                onClick={() => handleBucketChange(key)}
-                className={`px-3 py-1.5 rounded-full text-sm border ${
-                  bucket === key ? 'bg-black text-white border-black' : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
-                }`}
+                onClick={() => handleVideoBucketChange(key as keyof typeof videoBucketDisplayNames)}
+                className={`px-3 py-1.5 rounded-full text-sm border ${videoBucket === key ? 'bg-black text-white border-black' : 'bg-gray-100 border-gray-300 hover:bg-gray-200'}`}
               >
                 {label}
               </button>
@@ -684,163 +676,143 @@ useEffect(() => {
           </div>
         )}
 
-        {/* Loading State */}
+        {/* Book chips - only show for external books */}
+        {mode === 'books' && (
+          <div className="flex flex-wrap gap-2 mb-6">
+            <button
+              onClick={() => handleBucketChange('')}
+              className={`px-3 py-1.5 rounded-full text-sm border ${bucket === '' ? 'bg-black text-white border-black' : 'bg-gray-100 border-gray-300 hover:bg-gray-200'}`}
+            >
+              All
+            </button>
+            {Object.entries(bucketDisplayNames).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => handleBucketChange(key)}
+                className={`px-3 py-1.5 rounded-full text-sm border ${bucket === key ? 'bg-black text-white border-black' : 'bg-gray-100 border-gray-300 hover:bg-gray-200'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Loading */}
         {loading && <div className="text-center py-8 text-gray-600">Loading...</div>}
 
-        {/* Results Grid */}
-        {/* Results Grid */}
-{!loading && (
-  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-6">
-    {mode === 'books' &&
-      books.map((book) => (
-        <div
-          key={book.id}
-          className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md"
-          onClick={() => setSelectedItem(book)}
-        >
-          <img
-            src={book.thumbnail || FALLBACK_THUMB}
-            alt={book.title}
-            className="w-full h-40 object-cover rounded-lg bg-gray-100"
-          />
-          <div className="flex-1">
-            <h3 className="font-semibold text-sm line-clamp-2">{book.title}</h3>
-            <p className="text-xs text-gray-600 mt-1">
-              {book.authors.length > 0 ? book.authors.join(', ') : 'Unknown author'}
-            </p>
-            {book.buckets && book.buckets.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-2">
-                {book.buckets.map((bucketItem) => (
-                  <span
-                    key={bucketItem}
-                    className="text-xs bg-gray-100 border border-gray-300 rounded-full px-2 py-0.5"
+        {/* Collection Error Message */}
+        {collectionMessage && (
+          <div className="text-center py-4 text-red-500 font-medium">{collectionMessage}</div>
+        )}
+
+        {/* Results */}
+        {!loading && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-6">
+            {getCurrentItems().map((item, index) => {
+              if (mode === 'books' && isBook(item)) {
+                const book = item as Book;
+                return (
+                  <div
+                    key={book.id}
+                    className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md"
+                    onClick={() => setSelectedItem(book)}
                   >
-                    {humanizeBucket(bucketItem)}
-                  </span>
-                ))}
-              </div>
-            )}
+                    <img
+                      src={book.thumbnail || FALLBACK_THUMB}
+                      alt={book.title}
+                      className="w-full h-40 object-cover rounded-lg bg-gray-100"
+                    />
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-sm line-clamp-2">{book.title}</h3>
+                      <p className="text-xs text-gray-600 mt-1">
+                        {book.authors.length > 0 ? book.authors.join(', ') : 'Unknown author'}
+                      </p>
+                      {book.buckets && book.buckets.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {book.buckets.map((bucketItem) => (
+                            <span
+                              key={bucketItem}
+                              className="text-xs bg-gray-100 border border-gray-300 rounded-full px-2 py-0.5"
+                            >
+                              {humanizeBucket(bucketItem)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              } else if (mode === 'videos' && isVideo(item)) {
+                const video = item as Video;
+                return (
+                  <div
+                    key={`${video.videoId}-${index}`}
+                    className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md"
+                    onClick={() => setSelectedItem(video)}
+                  >
+                    {video.thumbnail && (
+                      <img
+                        src={video.thumbnail}
+                        alt={video.title}
+                        className="w-full h-40 object-cover rounded-lg bg-gray-100"
+                      />
+                    )}
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-sm line-clamp-2">{video.title}</h3>
+                      {video.channel && <p className="text-xs text-gray-600 mt-1">{video.channel}</p>}
+                    </div>
+                  </div>
+                );
+              } else if ((mode === 'collection-books' || mode === 'collection-videos') && isContentItem(item)) {
+                const contentItem = item as ContentItem;
+                return (
+                  <div
+                    key={`${contentItem.id}-${index}`}
+                    className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md"
+                    onClick={() => setSelectedItem(contentItem)}
+                  >
+                    <img
+                      src={contentItem.thumbnail || FALLBACK_THUMB}
+                      alt={contentItem.title}
+                      className="w-full h-40 object-cover rounded-lg bg-gray-100"
+                    />
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-sm line-clamp-2">{contentItem.title}</h3>
+                      <p className="text-xs text-gray-600 mt-1">
+                        {contentItem.authors.length > 0 ? contentItem.authors.join(', ') : 'Unknown author'}
+                      </p>
+                      {contentItem.categories && contentItem.categories.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {contentItem.categories.map((category) => (
+                            <span
+                              key={category}
+                              className="text-xs bg-blue-100 border border-blue-300 rounded-full px-2 py-0.5"
+                            >
+                              {category}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })}
           </div>
-        </div>
-      ))}
-
-    {mode === 'videos' &&
-      videos.map((video, index) => (
-        <div
-          key={`${video.videoId}-${index}`}
-          className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md"
-          onClick={() => setSelectedItem(video)}
-        >
-          {video.thumbnail && (
-            <img
-              src={video.thumbnail}
-              alt={video.title}
-              className="w-full h-40 object-cover rounded-lg bg-gray-100"
-            />
-          )}
-          <div className="flex-1">
-            <h3 className="font-semibold text-sm line-clamp-2">{video.title}</h3>
-            {video.channel && <p className="text-xs text-gray-600 mt-1">{video.channel}</p>}
-          </div>
-        </div>
-      ))}
-
-    {mode === 'collection' &&
-      (collectionItems.length === 0 ? (
-        <div className="text-center text-gray-600 py-8">No items found.</div>
-      ) : (
-        collectionItems.map((item) => (
-          <div
-            key={item.id}
-            className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md"
-            onClick={() => setSelectedItem(item)}
-          >
-            {item.thumbnail && (
-              <img
-                src={item.thumbnail || FALLBACK_THUMB}
-                alt={item.title}
-                className="w-full h-40 object-cover rounded-lg bg-gray-100"
-              />
-            )}
-            <div className="flex-1">
-              <h3 className="font-semibold text-sm line-clamp-2">{item.title}</h3>
-              {item.authors.length > 0 && (
-                <p className="text-xs text-gray-600 mt-1">{item.authors.join(', ')}</p>
-              )}
-              {item.categories.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {item.categories.map((cat) => (
-                    <span
-                      key={cat}
-                      className="text-xs bg-gray-100 border border-gray-300 rounded-full px-2 py-0.5"
-                    >
-                      {cat}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-            </div>
-          </div>
-        ))
-      ))}
-
-    {mode === 'collection-videos' &&
-      (collectionVideos.length === 0 ? (
-        <div className="text-center text-gray-600 py-8">No videos found.</div>
-      ) : (
-        collectionVideos.map((item) => (
-          <div
-            key={item.id}
-            className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md"
-            onClick={() => setSelectedItem(item)}
-          >
-            {item.thumbnail && (
-              <img
-                src={item.thumbnail || FALLBACK_THUMB}
-                alt={item.title}
-                className="w-full h-40 object-cover rounded-lg bg-gray-100"
-              />
-            )}
-            <div className="flex-1">
-              <h3 className="font-semibold text-sm line-clamp-2">{item.title}</h3>
-              {item.authors.length > 0 && (
-                <p className="text-xs text-gray-600 mt-1">{item.authors.join(', ')}</p>
-              )}
-              {item.categories.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {item.categories.map((cat) => (
-                    <span
-                      key={cat}
-                      className="text-xs bg-gray-100 border border-gray-300 rounded-full px-2 py-0.5"
-                    >
-                      {cat}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {item.synopsis && (
-                <p className="text-sm text-gray-700 mt-1 line-clamp-3">{item.synopsis}</p>
-              )}
-
-            </div>
-          </div>
-        ))
-      ))}
-  </div>
-)}
-
+        )}
 
         {/* No Results */}
-        {!loading && mode === 'books' && books.length === 0 && (
-          <div className="text-center py-8 text-gray-600">No books found.</div>
+        {!loading && getCurrentItems().length === 0 && !collectionMessage && (
+          <div className="text-center py-8 text-gray-600">
+            {mode === 'books' && 'No books found.'}
+            {mode === 'videos' && 'No videos found.'}
+            {mode === 'collection-books' && 'No books found in our collection.'}
+            {mode === 'collection-videos' && 'No videos found in our collection.'}
+          </div>
         )}
 
-        {!loading && mode === 'videos' && videos.length === 0 && (
-          <div className="text-center py-8 text-gray-600">No videos found.</div>
-        )}
-
-        {/* Pagination */}
+        {/* Pagination - only for external content */}
         {!loading && (
           <>
             {mode === 'books' && books.length > 0 && <BooksPagination />}
@@ -852,7 +824,7 @@ useEffect(() => {
       {/* Selected Item Modal */}
       {selectedItem && (
         <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-50 text-gray-800 overflow-auto p-4">
-          <div className="bg-white p-6 rounded-xl w-full max-w-[500px] relative max-h-[90vh] overflow-y-auto">
+          <div className="bg-white p-6 rounded-xl w-full max-w-[720px] relative max-h-[90vh] overflow-y-auto">
             {/* Close button */}
             <button onClick={() => setSelectedItem(null)} className="sticky top-0 float-right text-xl font-bold bg-white">
               ×
@@ -861,24 +833,197 @@ useEffect(() => {
             {/* Title */}
             <h2 className="text-xl font-bold mb-2">{(selectedItem as any).title}</h2>
 
-            {/* Description/Details */}
-            {isBook(selectedItem) && selectedItem.synopsis && (
-              <p className="text-sm text-[#444] mb-3">{selectedItem.synopsis}</p>
-            )}
-            {isVideo(selectedItem) && (
-              <p className="text-sm text-[#444] mb-3">{selectedItem.channel}</p>
+            {(isBook(selectedItem) || isContentItem(selectedItem)) && (
+              <>
+                {/* Top: cover + meta */}
+                <div className="flex gap-4 mb-4">
+                  <img
+                    src={(selectedItem as any).thumbnail || FALLBACK_THUMB}
+                    alt={`${(selectedItem as any).title} cover`}
+                    className="w-20 h-28 sm:w-24 sm:h-32 object-cover rounded-lg shadow-sm bg-gray-100 flex-shrink-0"
+                  />
+                  <div className="min-w-0">
+                    {(selectedItem as any).authors?.length ? (
+                      <p className="text-xs text-gray-600">{(selectedItem as any).authors.join(', ')}</p>
+                    ) : null}
+                    {isBook(selectedItem) && selectedItem.categories?.length ? (
+                      <p className="text-[11px] text-gray-500 mt-1">{selectedItem.categories.join(', ')}</p>
+                    ) : null}
+                    {isContentItem(selectedItem) && selectedItem.categories?.length ? (
+                      <p className="text-[11px] text-gray-500 mt-1">{selectedItem.categories.join(', ')}</p>
+                    ) : null}
+                  </div>
+                </div>
+
+                {/* Description */}
+                <p className="text-sm text-[#444] leading-6 mb-3">
+                  {isBook(selectedItem) 
+                    ? (selectedItem.snippet ?? selectedItem.synopsis ?? 'No description available.')
+                    : isContentItem(selectedItem) 
+                    ? (selectedItem.synopsis || 'No description available.')
+                    : 'No description available.'}
+                </p>
+
+                {/* Read sample toggle - for external books */}
+                {isBook(selectedItem) && selectedItem.id && (
+                  <div className="mb-4">
+                    <button
+                      onClick={() => setShowPreview(s => !s)}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50"
+                    >
+                      {showPreview ? 'Hide preview' : 'Read sample'}
+                      <svg className={`w-4 h-4 transition-transform ${showPreview ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/>
+                      </svg>
+                    </button>
+
+                    {showPreview && (
+                      <div className="mt-3 rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-gray-50">
+                        {/* Portrait-ish aspect for books */}
+                        <div className="relative pt-[133.33%] sm:pt-[100%]">
+                          <iframe
+                            src={`https://books.google.com/books?id=${encodeURIComponent(selectedItem.id)}&printsec=frontcover&output=embed`}
+                            title={`${selectedItem.title} — preview`}
+                            className="absolute inset-0 w-full h-full"
+                            allowFullScreen
+                          />
+                        </div>
+                        <div className="p-2 text-[11px] text-gray-500">
+                          Preview availability is determined by the publisher; some titles may have limited pages.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Read sample toggle - for collection books */}
+                {isContentItem(selectedItem) && mode === 'collection-books' && selectedItem.link && selectedItem.link !== '#' && (
+                  <div className="mb-4">
+                    <button
+                      onClick={() => setShowPreview(s => !s)}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50"
+                    >
+                      {showPreview ? 'Hide preview' : 'Read sample'}
+                      <svg className={`w-4 h-4 transition-transform ${showPreview ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/>
+                      </svg>
+                    </button>
+
+                    {showPreview && (
+                      <div className="mt-3 rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-gray-50">
+                        {/* Portrait-ish aspect for books */}
+                        <div className="relative pt-[133.33%] sm:pt-[100%]">
+                          <iframe
+                            src={selectedItem.link}
+                            title={`${selectedItem.title} — preview`}
+                            className="absolute inset-0 w-full h-full"
+                            allowFullScreen
+                            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                          />
+                        </div>
+                        <div className="p-2 text-[11px] text-gray-500">
+                          Preview loaded from: {new URL(selectedItem.link).hostname}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* External link for books */}
+                {isBook(selectedItem) && bestBookUrl(selectedItem) && (
+                  <a
+                    href={bestBookUrl(selectedItem)!}
+                    target="_blank"
+                    rel="noopener"
+                    className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 mb-3"
+                  >
+                    View on Google Books
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M12.293 2.293a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L14 5.414V14a1 1 0 11-2 0V5.414L9.707 7.707A1 1 0 118.293 6.293l4-4z"/>
+                      <path d="M3 9a1 1 0 011-1h4a1 1 0 110 2H5v6h10v-3a1 1 0 112 0v4a1 1 0 01-1 1H4a1 1 0 01-1-1V9z"/>
+                    </svg>
+                  </a>
+                )}
+
+                {/* External link for collection items */}
+                {isContentItem(selectedItem) && selectedItem.link && selectedItem.link !== '#' && (
+                  <a
+                    href={selectedItem.link}
+                    target="_blank"
+                    rel="noopener"
+                    className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 mb-3"
+                  >
+                    View External Link
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M12.293 2.293a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L14 5.414V14a1 1 0 11-2 0V5.414L9.707 7.707A1 1 0 118.293 6.293l4-4z"/>
+                      <path d="M3 9a1 1 0 011-1h4a1 1 0 110 2H5v6h10v-3a1 1 0 112 0v4a1 1 0 01-1 1H4a1 1 0 01-1-1V9z"/>
+                    </svg>
+                  </a>
+                )}
+              </>
             )}
 
+            {isVideo(selectedItem) && (
+              <>
+                {/* Player */}
+                <div className="rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-black mb-3">
+                  <div className="relative pt-[56.25%]">
+                    <iframe
+                      src={`https://www.youtube-nocookie.com/embed/${selectedItem.videoId}?rel=0&modestbranding=1`}
+                      title={selectedItem.title}
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowFullScreen
+                      loading="lazy"
+                      className="absolute inset-0 w-full h-full"
+                    />
+                  </div>
+                </div>
+
+                {/* Meta row */}
+                <div className="flex flex-wrap items-center justify-between gap-2 text-sm mb-2">
+                  <div className="text-gray-700">
+                    {selectedItem.channel && (
+                      <span className="font-medium text-gray-900">{selectedItem.channel}</span>
+                    )}
+                    {selectedItem.publishedAt && (
+                      <span className="ml-2 text-gray-500">• {fmtDate(selectedItem.publishedAt)}</span>
+                    )}
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full border border-gray-200 bg-gray-50 text-xs">
+                    {videoBucketDisplayNames[videoBucket]}
+                  </span>
+                </div>
+
+                {(selectedItem as any).description && (
+                  <p className="text-sm text-gray-700 mb-3">
+                    {stripTags((selectedItem as any).description as string)}
+                  </p>
+                )}
+
+                {["admin", "user"].includes(role?.toLowerCase()) && (
+                  <a
+                    href={selectedItem.url || `https://www.youtube.com/watch?v=${selectedItem.videoId}`}
+                    target="_blank"
+                    rel="noopener"
+                    className="text-blue-600 hover:text-blue-800 text-sm mb-3 block"
+                  >
+                    Watch on YouTube
+                  </a>
+                )}
+
+                <hr className="my-3 border-gray-200" />
+              </>
+            )}
 
             {/* Actions */}
             <div className="flex flex-col gap-2 mb-3">
               {user && (
                 <>
                   <button
-                    onClick={() => toggleFavourite(selectedItem, mode === 'books' ? 'book' : 'video')}
+                    onClick={() => toggleFavourite(selectedItem, (mode === 'books' || mode === 'collection-books') ? 'book' : 'video')}
                     className="px-3 py-1 rounded-lg border"
                   >
-                    {isFavourite(getItemId(selectedItem), mode === 'books' ? 'book' : 'video')
+                    {isFavourite(getItemId(selectedItem), (mode === 'books' || mode === 'collection-books') ? 'book' : 'video')
                       ? '★ Remove Favourite'
                       : '☆ Add Favourite'}
                   </button>
@@ -886,121 +1031,69 @@ useEffect(() => {
                     Leave Review
                   </button>
                   <button
-                    onClick={() => reportContent(selectedItem, mode === 'books' ? 'book' : 'video')}
+                    onClick={() => reportContent(selectedItem, (mode === 'books' || mode === 'collection-books') ? 'book' : 'video')}
                     className="px-3 py-1 rounded-lg border text-red-600"
                   >
                     Report Content
                   </button>
                 </>
               )}
-
-              {/* External links */}
-           {["admin", "user"].includes(role?.toLowerCase()) && (
-  <div className="flex flex-col gap-2 mb-3">
-    {/* Collection items */}
-    {(mode === "collection" || mode === "collection-videos") && selectedItem.link && (
-      <a
-        href={selectedItem.link}
-        target="_blank"
-        rel="noopener"
-        className="text-blue-600 hover:text-blue-800 text-sm"
-      >
-        {mode === "collection" ? "View Link" : "Watch Video"}
-      </a>
-    )}
-
-    {/* Google Books API */}
-    {mode === "books" && isBook(selectedItem) && bestBookUrl(selectedItem) && (
-      <a
-        href={bestBookUrl(selectedItem)!}
-        target="_blank"
-        rel="noopener"
-        className="text-blue-600 hover:text-blue-800 text-sm"
-      >
-        View on Google Books
-      </a>
-    )}
-
-    {/* YouTube API */}
-    {mode === "videos" && isVideo(selectedItem) && (
-      <a
-        href={selectedItem.url || `https://www.youtube.com/watch?v=${selectedItem.videoId}`}
-        target="_blank"
-        rel="noopener"
-        className="text-blue-600 hover:text-blue-800 text-sm"
-      >
-        Watch on YouTube
-      </a>
-    )}
-  </div>
-)}
-
-
-              
-
             </div>
 
             {/* Reviews */}
-            {/* Reviews */}
-<div className="mt-3">
-  <h3 className="font-semibold mb-1">Reviews</h3>
+            <div className="mt-3">
+              <h3 className="font-semibold mb-1">Reviews</h3>
 
-  {/* Always show reviews */}
-  {reviewsMap[getItemId(selectedItem)]?.length ? (
-    reviewsMap[getItemId(selectedItem)].map((r) => (
-      <div key={r.id} className="border border-[#eee] p-2 rounded-lg mb-1 text-sm">
-        <strong>{r.userName}</strong>: {r.content}
-        {user && (
-          <button
-            onClick={() => reportReview(r.id)}
-            className="text-xs text-red-500 ml-2"
-          >
-            Report
-          </button>
-        )}
-      </div>
-    ))
-  ) : (
-    <p className="text-sm text-gray-500">No reviews yet.</p>
-  )}
+              {reviewsMap[getItemId(selectedItem)]?.length ? (
+                reviewsMap[getItemId(selectedItem)].map((r) => (
+                  <div key={r.id} className="border border-[#eee] p-2 rounded-lg mb-1 text-sm">
+                    <strong>{r.userName}</strong>: {r.content}
+                    {user && (
+                      <button
+                        onClick={() => reportReview(r.id)}
+                        className="text-xs text-red-500 ml-2"
+                      >
+                        Report
+                      </button>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-gray-500">No reviews yet.</p>
+              )}
 
-  {/* Only logged-in users can leave a review */}
-  {user ? (
-    <div className="mt-2">
-      <textarea
-        ref={reviewRef}
-        value={reviewContent}
-        onChange={(e) => setReviewContent(e.target.value)}
-        placeholder="Write a review…"
-        className="w-full border rounded-lg p-2 text-sm"
-      />
-      <button
-        onClick={submitReview}
-        className="mt-1 px-3 py-1 bg-[#111] text-white rounded-lg"
-      >
-        Submit
-      </button>
-    </div>
-  ) : (
-    <p className="text-xs text-gray-500 mt-2">
-      <Link href="/login" className="text-gray-700 hover:text-pink-500">Login</Link> to leave a review.
-    </p>
-  )}
-</div>
-
+              {user ? (
+                <div className="mt-2">
+                  <textarea
+                    ref={reviewRef}
+                    value={reviewContent}
+                    onChange={(e) => setReviewContent(e.target.value)}
+                    placeholder="Write a review…"
+                    className="w-full border rounded-lg p-2 text-sm"
+                  />
+                  <button
+                    onClick={submitReview}
+                    className="mt-1 px-3 py-1 bg-[#111] text-white rounded-lg"
+                  >
+                    Submit
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500 mt-2">
+                  <Link href="/login" className="text-gray-700 hover:text-pink-500">Login</Link> to leave a review.
+                </p>
+              )}
+            </div>
           </div>
         </div>
       )}
-{["admin", "user"].includes(role?.toLowerCase()) && (
-  <>
-    {/* Chatbot */}
-    {/* <Chatbot /> */}
-    <DialogflowMessenger />
-  </>
-)}
 
-    
-
+      {["admin", "user"].includes(role?.toLowerCase()) && (
+        <>
+          {/* <Chatbot /> */}
+          <DialogflowMessenger />
+        </>
+      )}
     </main>
   );
 }
