@@ -4,12 +4,21 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  collection,
+  getDocs,
+  query,
+  orderBy,
+} from "firebase/firestore";
 
 interface Plan {
   id: string;
   name: string;
-  price: string;
+  price: number; // ✅ use number instead of string
   features: string[];
   isFree?: boolean;
 }
@@ -22,14 +31,24 @@ export default function SubscriptionPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
 
-  // Fetch plans from Firestore
+  // ✅ Fetch plans from Firestore in ascending order by price
   const fetchPlans = async () => {
-    const snapshot = await getDocs(collection(db, "plans"));
-    const plansList: Plan[] = snapshot.docs.map((docSnap) => ({
-      id: docSnap.id,
-      ...(docSnap.data() as Omit<Plan, "id">),
-    }));
-    setPlans(plansList);
+    try {
+      const q = query(collection(db, "plans"), orderBy("price", "asc"));
+      const snapshot = await getDocs(q);
+
+      let plansList: Plan[] = snapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...(docSnap.data() as Omit<Plan, "id">),
+      }));
+
+      // Fallback safety: sort in case Firestore returns unsorted
+      plansList = plansList.sort((a, b) => a.price - b.price);
+
+      setPlans(plansList);
+    } catch (error) {
+      console.error("Error fetching plans:", error);
+    }
   };
 
   useEffect(() => {
@@ -120,7 +139,9 @@ export default function SubscriptionPage() {
               }`}
             >
               <h2 className="text-2xl font-bold text-pink-600 mb-4">{plan.name}</h2>
-              <p className="text-gray-900 text-xl font-semibold mb-6">$ {plan.price}</p>
+              <p className="text-gray-900 text-xl font-semibold mb-6">
+                $ {plan.price.toFixed(2)}
+              </p>
 
               <ul className="text-gray-700 mb-6 space-y-2">
                 {plan.features.map((feature, idx) => (
