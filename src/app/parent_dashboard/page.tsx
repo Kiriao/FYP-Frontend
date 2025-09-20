@@ -304,7 +304,7 @@ const handleAddChild = async (e: React.FormEvent) => {
         </div>
 
         {/* Children Selector & Dashboard */}
-        {children.length > 0 && (
+{/*         {children.length > 0 && (
           <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200 mb-6">
             <h2 className="text-xl font-semibold text-pink-600 mb-4">Select Child</h2>
             <select
@@ -337,10 +337,10 @@ const handleAddChild = async (e: React.FormEvent) => {
                   {selectedChild.restrictions?.length
                     ? selectedChild.restrictions.join(", ")
                     : "None"}
-                </p>
+                </p> */}
 
                 {/* Update Child Password */}
-                <form onSubmit={handleUpdateChildPassword} className="flex flex-col gap-3 mt-3 relative">
+{/*                 <form onSubmit={handleUpdateChildPassword} className="flex flex-col gap-3 mt-3 relative">
                   <input
                     type={showChildNewPassword ? "text" : "password"}
                     placeholder="New Password"
@@ -358,10 +358,10 @@ const handleAddChild = async (e: React.FormEvent) => {
                   <button type="submit" className="w-full py-2 bg-pink-600 text-white rounded-md font-semibold hover:bg-pink-700 transition">
                     Update Child Password
                   </button>
-                </form>
+                </form> */}
 
                 {/* Update Child Restrictions */}
-                <form onSubmit={handleUpdateChildRestrictions} className="flex flex-col gap-3 mt-3">
+{/*                 <form onSubmit={handleUpdateChildRestrictions} className="flex flex-col gap-3 mt-3">
                   <input
                     type="text"
                     value={childRestrictions}
@@ -372,11 +372,11 @@ const handleAddChild = async (e: React.FormEvent) => {
                   <button type="submit" className="w-full py-2 bg-pink-600 text-white rounded-md font-semibold hover:bg-pink-700 transition">
                     Update Restrictions
                   </button>
-                </form>
-              </div>
+                </form> */}
+{/*               </div>
             )}
           </div>
-        )}
+        )} */}
       </div>
     </section>
   );

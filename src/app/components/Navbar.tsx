@@ -115,6 +115,14 @@ export default function Navbar() {
                       )}
                       {(role === "admin" || role === "parent") && (
                         <Link
+                          href="/parent_dashboard"
+                          className="block px-4 py-2 text-gray-700 hover:bg-gray-100"
+                        >
+                          Parent Dashboard
+                        </Link>
+                      )}
+                      {(role === "admin" || role === "parent") && (
+                        <Link
                           href="/editprofile"
                           className="block px-4 py-2 text-gray-700 hover:bg-gray-100"
                         >
