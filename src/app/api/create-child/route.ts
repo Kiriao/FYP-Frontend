@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
       parentId,
     });
 
-    // 3️⃣ Create Firestore user doc
+    // 3️⃣ Create Firestore user document (Admin SDK style)
     await db.collection("users").doc(userRecord.uid).set({
       fullName: childName,
       email: childEmail,
@@ -63,10 +63,9 @@ export async function POST(req: NextRequest) {
     });
 
     // 4️⃣ Generate email verification link
-    const verificationLink = await authAdmin.generateEmailVerificationLink(
-      childEmail,
-      { url: process.env.NEXT_PUBLIC_APP_URL + "/login" }
-    );
+    const verificationLink = await authAdmin.generateEmailVerificationLink(childEmail, {
+      url: `${process.env.NEXT_PUBLIC_APP_URL}/login`,
+    });
 
     // 5️⃣ Send email via Nodemailer
     const transporter = nodemailer.createTransport({
@@ -89,7 +88,6 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true, childId: userRecord.uid });
-
   } catch (error: any) {
     console.error("Error creating child:", error);
     return NextResponse.json(
