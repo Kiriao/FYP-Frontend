@@ -113,7 +113,7 @@ export default function Navbar() {
                           Admin Dashboard
                         </Link>
                       )}
-                      {(role === "admin" || role === "parent") && (
+                      {(role === "NA" || role === "parent") && (
                         <Link
                           href="/parent_dashboard"
                           className="block px-4 py-2 text-gray-700 hover:bg-gray-100"
@@ -121,15 +121,15 @@ export default function Navbar() {
                           Parent Dashboard
                         </Link>
                       )}
-                      {(role === "admin" || role === "educator") && (
+                      {(role === "NA" || role === "educator") && (
                         <Link
                           href="/educator_dashboard"
                           className="block px-4 py-2 text-gray-700 hover:bg-gray-100"
                         >
-                          Parent Dashboard
+                          Educator Dashboard
                         </Link>
                       )}
-                      {(role === "admin" || role === "parent") && (
+                      {(role === "admin" || role === "parent" || role === "educator") && (
                         <Link
                           href="/editprofile"
                           className="block px-4 py-2 text-gray-700 hover:bg-gray-100"

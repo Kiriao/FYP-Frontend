@@ -29,6 +29,7 @@ interface Child {
 export default function EditProfilePage() {
   const [user, setUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<"profile" | "security" | "preferences" | "child">("profile");
+  const [role, setRole] = useState<string | null>(null);
 
   // Parent Profile
   const [fullName, setFullName] = useState("");
@@ -83,6 +84,7 @@ export default function EditProfilePage() {
         const userDoc = await getDoc(doc(db, "users", currentUser.uid));
         if (userDoc.exists()) {
           const data = userDoc.data();
+          setRole(data.role || "");
           setFullName(data.fullName || "");
           setPlan(data.plan || "Free Plans");
           setAvatar(data.avatar || "");
@@ -90,30 +92,38 @@ export default function EditProfilePage() {
           setInterests(data.interests || "");
           setReadingLevel(data.readingLevel || "");
 
-          if (data.role === "parent") {
-            const q = query(collection(db, "users"), where("parentId", "==", currentUser.uid));
-            const snapshot = await getDocs(q);
-            const kids: Child[] = snapshot.docs.map(docSnap => {
-              const docData = docSnap.data();
-              return {
-                id: docSnap.id,
-                fullName: docData.fullName || "",
-                email: docData.email || "",
-                restrictions: docData.restrictions || [],
-                ageRange: docData.ageRange || "",
-                interests: docData.interests || "",
-                readingLevel: docData.readingLevel || "",
-              };
-            });
-            setChildren(kids);
+// --- Inside your useEffect (load user info) ---
+if (data.role === "parent" || data.role === "educator") {
+  const roleKey = data.role === "parent" ? "parentId" : "educatorId";
+  const q = query(collection(db, "users"), where(roleKey, "==", currentUser.uid));
+  const snapshot = await getDocs(q);
 
-            if (kids.length > 0) {
-              const firstChild = kids[0];
-              setSelectedChild(firstChild);
-              setChildFullName(firstChild.fullName);
-              setChildRestrictions(firstChild.restrictions.join(", "));
-            }
-          }
+  const kids: Child[] = snapshot.docs.map(docSnap => {
+    const docData = docSnap.data();
+    return {
+      id: docSnap.id,
+      fullName: docData.fullName || "",
+      email: docData.email || "",
+      restrictions: docData.restrictions || [],
+      ageRange: docData.ageRange || "",
+      interests: docData.interests || "",
+      readingLevel: docData.readingLevel || "",
+    };
+  });
+
+  setChildren(kids);
+
+  if (kids.length > 0) {
+    const firstChild = kids[0];
+    setSelectedChild(firstChild);
+    setChildFullName(firstChild.fullName);
+    setChildRestrictions(firstChild.restrictions.join(", "));
+    setChildAgeRange(firstChild.ageRange || "");
+    setChildInterests(firstChild.interests || "");
+    setChildReadingLevel(firstChild.readingLevel || "");
+  }
+}
+
         }
       } catch (err) {
         console.error("Error fetching user data:", err);
@@ -315,7 +325,15 @@ export default function EditProfilePage() {
         <div className="w-48 border-r pr-4">
           <button className={`block w-full text-left py-2 px-3 rounded-md mb-2 font-semibold ${activeTab === "profile" ? "bg-pink-100 text-pink-600" : "text-gray-600"}`} onClick={() => setActiveTab("profile")}>Profile</button>
           <button className={`block w-full text-left py-2 px-3 rounded-md mb-2 font-semibold ${activeTab === "security" ? "bg-pink-100 text-pink-600" : "text-gray-600"}`} onClick={() => setActiveTab("security")}>Security</button>
-          <button className={`block w-full text-left py-2 px-3 rounded-md font-semibold ${activeTab === "child" ? "bg-pink-100 text-pink-600" : "text-gray-600"}`} onClick={() => setActiveTab("child")}>Manage Child</button>
+          <button
+            className={`block w-full text-left py-2 px-3 rounded-md font-semibold ${
+              activeTab === "child" ? "bg-pink-100 text-pink-600" : "text-gray-600"
+            }`}
+            onClick={() => setActiveTab("child")}
+          >
+            {role === "educator" ? "Manage Students" : "Manage Child"}
+          </button>
+
         </div>
 
         <div className="flex-1 space-y-6">
@@ -335,7 +353,9 @@ export default function EditProfilePage() {
                 }}
                 className="w-full px-4 py-2 border border-gray-300 rounded-md mb-4 text-gray-900"
               >
-                <option value="">-- Choose a Child --</option>
+              <option value="">
+                -- {role === "educator" ? "Choose a Student" : "Choose a Child"} --
+              </option>
                 {children.map(c => <option key={c.id} value={c.id}>{c.fullName}</option>)}
               </select>
 
@@ -392,12 +412,15 @@ export default function EditProfilePage() {
       <option value="advanced">Advanced</option>
     </select>
 
-    <button
-      type="submit"
-      className="w-full py-2 bg-pink-600 text-white rounded-md font-semibold hover:bg-pink-700 transition"
-    >
-      Update Child
-    </button>
+      <button
+        className={`w-full py-2 bg-pink-600 text-white rounded-md font-semibold hover:bg-pink-700 transition ${
+          activeTab === "child" ? "bg-pink-100 text-pink-600" : "text-gray-600"
+        }`}
+        onClick={() => setActiveTab("child")}
+      >
+        {role === "educator" ? "Update Student" : "Update Child"}
+      </button>
+
   </form>
 )}
 
@@ -409,7 +432,9 @@ export default function EditProfilePage() {
                       type={showChildNewPassword ? "text" : "password"}
                       value={childNewPassword}
                       onChange={(e) => setChildNewPassword(e.target.value)}
-                      placeholder="New Child Password"
+                      placeholder={
+                        role === "educator" ? "New Student Password" : "New Child Password"
+                      }
                       className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900"
                     />
                     <button
@@ -421,11 +446,14 @@ export default function EditProfilePage() {
                     </button>
                   </div>
                   <button
-                    type="submit"
-                    className="w-full py-2 bg-purple-600 text-white rounded-md font-semibold hover:bg-purple-700 transition"
+                    className={`w-full py-2 bg-purple-600 text-white rounded-md font-semibold hover:bg-purple-700 transition ${
+                      activeTab === "child" ? "bg-pink-100 text-pink-600" : "text-gray-600"
+                    }`}
+                    onClick={() => setActiveTab("child")}
                   >
-                    Update Child Password
+                    {role === "educator" ? "Update Student Password" : "Update Child Password"}
                   </button>
+
                 </form>
               )}
             </div>
