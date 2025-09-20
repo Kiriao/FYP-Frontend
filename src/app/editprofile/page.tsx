@@ -14,12 +14,17 @@ import { useRouter } from "next/navigation";
 import { EyeIcon, EyeOffIcon } from "lucide-react";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
+// ---------------- Child Interface ----------------
 interface Child {
   id: string;
   fullName: string;
   email: string;
   restrictions: string[];
+  ageRange?: string;
+  interests?: string;
+  readingLevel?: string;
 }
+
 
 export default function EditProfilePage() {
   const [user, setUser] = useState<User | null>(null);
@@ -48,6 +53,12 @@ export default function EditProfilePage() {
   const [childRestrictions, setChildRestrictions] = useState("");
   const [childNewPassword, setChildNewPassword] = useState("");
   const [showChildNewPassword, setShowChildNewPassword] = useState(false);
+
+  // Child Perference
+  const [childAgeRange, setChildAgeRange] = useState("");
+  const [childInterests, setChildInterests] = useState("");
+  const [childReadingLevel, setChildReadingLevel] = useState("");
+
 
   // Loading states
   const [loading, setLoading] = useState(true);
@@ -89,6 +100,9 @@ export default function EditProfilePage() {
                 fullName: docData.fullName || "",
                 email: docData.email || "",
                 restrictions: docData.restrictions || [],
+                ageRange: docData.ageRange || "",
+                interests: docData.interests || "",
+                readingLevel: docData.readingLevel || "",
               };
             });
             setChildren(kids);
@@ -245,6 +259,10 @@ export default function EditProfilePage() {
       await updateDoc(doc(db, "users", selectedChild.id), {
         fullName: childFullName,
         restrictions: restrictionsArray,
+        ageRange: childAgeRange,
+        interests: childInterests,
+        readingLevel: childReadingLevel,
+
       });
 
       alert("Child profile updated successfully!");
@@ -297,7 +315,6 @@ export default function EditProfilePage() {
         <div className="w-48 border-r pr-4">
           <button className={`block w-full text-left py-2 px-3 rounded-md mb-2 font-semibold ${activeTab === "profile" ? "bg-pink-100 text-pink-600" : "text-gray-600"}`} onClick={() => setActiveTab("profile")}>Profile</button>
           <button className={`block w-full text-left py-2 px-3 rounded-md mb-2 font-semibold ${activeTab === "security" ? "bg-pink-100 text-pink-600" : "text-gray-600"}`} onClick={() => setActiveTab("security")}>Security</button>
-          <button className={`block w-full text-left py-2 px-3 rounded-md mb-2 font-semibold ${activeTab === "preferences" ? "bg-pink-100 text-pink-600" : "text-gray-600"}`} onClick={() => setActiveTab("preferences")}>Preferences</button>
           <button className={`block w-full text-left py-2 px-3 rounded-md font-semibold ${activeTab === "child" ? "bg-pink-100 text-pink-600" : "text-gray-600"}`} onClick={() => setActiveTab("child")}>Manage Child</button>
         </div>
 
@@ -322,13 +339,68 @@ export default function EditProfilePage() {
                 {children.map(c => <option key={c.id} value={c.id}>{c.fullName}</option>)}
               </select>
 
-              {selectedChild && (
-                <form onSubmit={handleUpdateChild} className="flex flex-col gap-3 mb-4">
-                  <input type="text" value={childFullName} onChange={e => setChildFullName(e.target.value)} placeholder="Child Full Name" className="text-gray-900 w-full px-4 py-2 border border-gray-300 rounded-md" />
-                  <input type="text" value={childRestrictions} onChange={e => setChildRestrictions(e.target.value)} placeholder="Restrictions (comma separated)" className="text-gray-900 w-full px-4 py-2 border border-gray-300 rounded-md" />
-                  <button type="submit" className="w-full py-2 bg-pink-600 text-white rounded-md font-semibold hover:bg-pink-700 transition">Update Child</button>
-                </form>
-              )}
+{selectedChild && (
+  <form onSubmit={handleUpdateChild} className="flex flex-col gap-3 mb-4">
+    <input
+      type="text"
+      value={childFullName}
+      onChange={e => setChildFullName(e.target.value)}
+      placeholder="Child Full Name"
+      className="text-gray-900 w-full px-4 py-2 border border-gray-300 rounded-md"
+    />
+
+    <input
+      type="text"
+      value={childRestrictions}
+      onChange={e => setChildRestrictions(e.target.value)}
+      placeholder="Restrictions (comma separated)"
+      className="text-gray-900 w-full px-4 py-2 border border-gray-300 rounded-md"
+    />
+
+    {/* --- Preferences now under Manage Child --- */}
+    <label className="text-sm font-medium text-gray-700">Age Range</label>
+    <select
+      value={childAgeRange}
+      onChange={e => setChildAgeRange(e.target.value)}
+      className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900"
+    >
+      <option value="">Select Age Range</option>
+      <option value="1-3">1–3</option>
+      <option value="4-6">4–6</option>
+      <option value="7-10">7–10</option>
+      <option value="11-12">11–12</option>
+    </select>
+
+    <label className="text-sm font-medium text-gray-700">Interests</label>
+    <input
+      type="text"
+      value={childInterests}
+      onChange={e => setChildInterests(e.target.value)}
+      placeholder="e.g. Fantasy, Science, History"
+      className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900"
+    />
+
+    <label className="text-sm font-medium text-gray-700">Reading Level</label>
+    <select
+      value={childReadingLevel}
+      onChange={e => setChildReadingLevel(e.target.value)}
+      className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900"
+    >
+      <option value="">Select Reading Level</option>
+      <option value="beginner">Beginner</option>
+      <option value="intermediate">Intermediate</option>
+      <option value="advanced">Advanced</option>
+    </select>
+
+    <button
+      type="submit"
+      className="w-full py-2 bg-pink-600 text-white rounded-md font-semibold hover:bg-pink-700 transition"
+    >
+      Update Child
+    </button>
+  </form>
+)}
+
 
               {selectedChild && (
                 <form onSubmit={handleUpdateChildPassword} className="flex flex-col gap-3">
