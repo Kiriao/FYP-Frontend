@@ -22,21 +22,33 @@ export default function LoginPage() {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Get user data from Firestore
+      // Check email verification for child accounts
       const userDoc = await getDoc(doc(db, "users", user.uid));
-      const userData = userDoc.exists() ? userDoc.data() : null;
+      if (!userDoc.exists()) {
+        await signOut(auth);
+        setError("User not found in the system.");
+        return;
+      }
 
-      if (!userData || userData.role === "inactive") {
-        // Logout user immediately if inactive
+      const userData = userDoc.data() as any;
+
+      if (userData.role === "child" && !user.emailVerified) {
+        await signOut(auth);
+        setError("Child account must verify email first. Please check your inbox.");
+        return;
+      }
+
+      if (userData.role === "inactive") {
         await signOut(auth);
         setError("Your account is inactive. Please contact support.");
         return;
       }
 
-      // Redirect for active users
-      router.push("/");
+      // All good, redirect
+      router.push(userData.role === "parent" ? "/" : "/");
 
-    } catch (err) {
+    } catch (err: any) {
+      console.error(err);
       setError("Invalid email or password.");
     }
   };
@@ -45,9 +57,7 @@ export default function LoginPage() {
     <section className="bg-white py-20 px-6">
       <div className="max-w-md mx-auto text-center">
         <h1 className="text-4xl font-bold text-pink-600 mb-6">Login</h1>
-        <p className="text-gray-700 mb-6">
-          Welcome back! Log in to continue exploring.
-        </p>
+        <p className="text-gray-700 mb-6">Welcome back! Log in to continue exploring.</p>
 
         <form
           onSubmit={handleLogin}
@@ -60,9 +70,7 @@ export default function LoginPage() {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-800 mb-1">
-              Email
-            </label>
+            <label className="block text-sm font-medium text-gray-800 mb-1">Email</label>
             <input
               type="email"
               value={email}
@@ -74,9 +82,7 @@ export default function LoginPage() {
           </div>
 
           <div className="relative">
-            <label className="block text-sm font-medium text-gray-800 mb-1">
-              Password
-            </label>
+            <label className="block text-sm font-medium text-gray-800 mb-1">Password</label>
             <input
               type={showPassword ? "text" : "password"}
               value={password}

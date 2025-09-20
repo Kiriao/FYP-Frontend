@@ -1,0 +1,100 @@
+// src/app/api/create-child/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { initializeApp, cert, getApps, getApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
+import nodemailer from "nodemailer";
+
+// ------------------------
+// Initialize Firebase Admin
+// ------------------------
+let adminApp;
+if (!getApps().length) {
+  adminApp = initializeApp({
+    credential: cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+    }),
+  });
+} else {
+  adminApp = getApp();
+}
+
+const authAdmin = getAuth(adminApp);
+const db = getFirestore(adminApp);
+
+// ------------------------
+// POST: Create Child
+// ------------------------
+export async function POST(req: NextRequest) {
+  try {
+    const { parentId, childName, childEmail, childPassword } = await req.json();
+
+    if (!parentId || !childName || !childEmail || !childPassword) {
+      return NextResponse.json(
+        { success: false, error: "Missing required fields" },
+        { status: 400 }
+      );
+    }
+
+    // 1️⃣ Create child in Firebase Auth
+    const userRecord = await authAdmin.createUser({
+      email: childEmail,
+      password: childPassword,
+      displayName: childName,
+      emailVerified: false,
+    });
+
+    // 2️⃣ Add custom claims
+    await authAdmin.setCustomUserClaims(userRecord.uid, {
+      role: "child",
+      parentId,
+    });
+
+    // 3️⃣ Create Firestore user doc
+    await db.collection("users").doc(userRecord.uid).set({
+      fullName: childName,
+      email: childEmail,
+      role: "child",
+      parentId,
+      restrictions: [],
+      createdAt: new Date().toISOString(),
+    });
+
+    // 4️⃣ Generate email verification link
+    const verificationLink = await authAdmin.generateEmailVerificationLink(
+      childEmail,
+      { url: process.env.NEXT_PUBLIC_APP_URL + "/login" }
+    );
+
+    // 5️⃣ Send email via Nodemailer
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD,
+      },
+    });
+
+    await transporter.sendMail({
+      from: process.env.GMAIL_USER,
+      to: childEmail,
+      subject: "Verify Your Child Account",
+      html: `
+        <h3>Hello ${childName},</h3>
+        <p>You have been added as a child account. Please verify your email by clicking the link below:</p>
+        <a href="${verificationLink}">Verify Email</a>
+      `,
+    });
+
+    return NextResponse.json({ success: true, childId: userRecord.uid });
+
+  } catch (error: any) {
+    console.error("Error creating child:", error);
+    return NextResponse.json(
+      { success: false, error: error.message },
+      { status: 500 }
+    );
+  }
+}

@@ -20,12 +20,11 @@ export default function RegisterPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
-
   const [showModal, setShowModal] = useState<"terms" | "privacy" | null>(null);
 
   const router = useRouter();
 
-  const handleSubmit = async (e: any) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (password !== confirmPassword) {
@@ -39,23 +38,31 @@ export default function RegisterPage() {
     }
 
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      // 🔹 Create Parent Account
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password
+      );
       const user = userCredential.user;
 
       await updateProfile(user, { displayName: fullName });
       await sendEmailVerification(user);
 
+      // 🔹 Save as Parent in Firestore
       await setDoc(doc(db, "users", user.uid), {
         uid: user.uid,
         fullName,
         email: user.email,
-        role: "user",
+        role: "parent", // 👈 only parents register
         createdAt: new Date(),
         emailVerified: user.emailVerified,
-        plan: "Free Plans",
+        plan: "Free Plan",
       });
 
-      alert("Registration successful! Please check your email to verify your account.");
+      alert(
+        "Registration successful! Please check your email to verify your account."
+      );
       await auth.signOut();
       router.push("/login");
     } catch (error: any) {
@@ -64,6 +71,7 @@ export default function RegisterPage() {
     }
   };
 
+  // 🔹 Password Handlers
   const handlePasswordChange = (value: string) => {
     setPassword(value);
     if (confirmPassword && value !== confirmPassword) {
@@ -85,9 +93,9 @@ export default function RegisterPage() {
   return (
     <section className="bg-white py-20 px-6">
       <div className="max-w-md mx-auto text-center">
-        <h1 className="text-4xl font-bold text-pink-600 mb-6">Register</h1>
+        <h1 className="text-4xl font-bold text-pink-600 mb-6">Parent Register</h1>
         <p className="text-gray-700 mb-6">
-          Create a free KidFlix account to get personalized content for your kids.
+          Create a free KidFlix parent account to add and manage child profiles.
         </p>
 
         <form
@@ -103,7 +111,7 @@ export default function RegisterPage() {
               type="text"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-pink-400 focus:border-pink-400"
+              className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-pink-400 focus:border-pink-400"
               placeholder="Your full name"
               required
             />
@@ -118,7 +126,7 @@ export default function RegisterPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-pink-400 focus:border-pink-400"
+              className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-pink-400 focus:border-pink-400"
               placeholder="you@example.com"
               required
             />
@@ -133,7 +141,7 @@ export default function RegisterPage() {
               type={showPassword ? "text" : "password"}
               value={password}
               onChange={(e) => handlePasswordChange(e.target.value)}
-              className={`w-full px-4 py-2 border rounded-md text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-pink-400 ${
+              className={`w-full px-4 py-2 border rounded-md text-gray-900 focus:outline-none focus:ring-pink-400 ${
                 passwordError ? "border-red-500" : "border-gray-300"
               }`}
               placeholder="********"
@@ -157,7 +165,7 @@ export default function RegisterPage() {
               type={showConfirmPassword ? "text" : "password"}
               value={confirmPassword}
               onChange={(e) => handleConfirmPasswordChange(e.target.value)}
-              className={`w-full px-4 py-2 border rounded-md text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-pink-400 ${
+              className={`w-full px-4 py-2 border rounded-md text-gray-900 focus:outline-none focus:ring-pink-400 ${
                 passwordError ? "border-red-500" : "border-gray-300"
               }`}
               placeholder="********"
@@ -166,18 +174,25 @@ export default function RegisterPage() {
             <button
               type="button"
               className="absolute right-3 top-9 text-gray-500"
-              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+              onClick={() =>
+                setShowConfirmPassword(!showConfirmPassword)
+              }
             >
-              {showConfirmPassword ? <EyeOffIcon size={20} /> : <EyeIcon size={20} />}
+              {showConfirmPassword ? (
+                <EyeOffIcon size={20} />
+              ) : (
+                <EyeIcon size={20} />
+              )}
             </button>
           </div>
 
-          {/* Error Message */}
-          {passwordError && <p className="text-red-500 text-sm">{passwordError}</p>}
+          {/* Error */}
+          {passwordError && (
+            <p className="text-red-500 text-sm">{passwordError}</p>
+          )}
 
-          {/* Terms & Conditions with Modal */}
+          {/* Terms */}
           <div className="flex items-center space-x-2">
-            {/* Only the box itself can be clicked */}
             <input
               type="checkbox"
               id="terms"
@@ -186,8 +201,6 @@ export default function RegisterPage() {
               className="mt-1"
               required
             />
-
-            {/* Text next to checkbox that opens the modal */}
             <span className="text-sm text-gray-700">
               I agree to the{" "}
               <span
@@ -216,7 +229,7 @@ export default function RegisterPage() {
                 : "bg-pink-600 text-white hover:bg-pink-700"
             }`}
           >
-            Create Account
+            Create Parent Account
           </button>
         </form>
 
@@ -231,22 +244,20 @@ export default function RegisterPage() {
                 &times;
               </button>
               <h2 className="text-2xl font-bold mb-4 text-pink-600">
-                {showModal === "terms" ? "Terms & Conditions" : "Privacy Policy"}
+                {showModal === "terms"
+                  ? "Terms & Conditions"
+                  : "Privacy Policy"}
               </h2>
               <div className="text-gray-700 text-sm max-h-96 overflow-y-auto">
                 {showModal === "terms" ? (
                   <p>
-                    {/* Add your terms text here */}
-                    Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed
-                    euismod, nisl nec tincidunt lacinia, nunc urna luctus
-                    libero, nec tempor sapien justo et risus.
+                    {/* Add terms content */}
+                    Lorem ipsum dolor sit amet, consectetur adipiscing elit.
                   </p>
                 ) : (
                   <p>
-                    {/* Add your privacy policy text here */}
+                    {/* Add privacy policy content */}
                     Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-                    Sed euismod, nisl nec tincidunt lacinia, nunc urna luctus
-                    libero, nec tempor sapien justo et risus.
                   </p>
                 )}
               </div>
