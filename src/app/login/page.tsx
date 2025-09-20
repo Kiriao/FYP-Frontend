@@ -14,44 +14,56 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
-  const handleLogin = async (e: any) => {
-    e.preventDefault();
-    setError("");
+const handleLogin = async (e: any) => {
+  e.preventDefault();
+  setError("");
 
-    try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
 
-      // Check email verification for child accounts
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      if (!userDoc.exists()) {
-        await signOut(auth);
-        setError("User not found in the system.");
-        return;
-      }
-
-      const userData = userDoc.data() as any;
-
-      if (userData.role === "child" && !user.emailVerified) {
-        await signOut(auth);
-        setError("Child account must verify email first. Please check your inbox.");
-        return;
-      }
-
-      if (userData.role === "inactive") {
-        await signOut(auth);
-        setError("Your account is inactive. Please contact support.");
-        return;
-      }
-
-      // All good, redirect
-      router.push(userData.role === "parent" ? "/" : "/");
-
-    } catch (err: any) {
-      console.error(err);
-      setError("Invalid email or password.");
+    // 🔹 Check user document in Firestore
+    const userDoc = await getDoc(doc(db, "users", user.uid));
+    if (!userDoc.exists()) {
+      await signOut(auth);
+      setError("User not found in the system.");
+      return;
     }
-  };
+
+    const userData = userDoc.data() as any;
+
+    if (userData.role === "child" && !user.emailVerified) {
+      await signOut(auth);
+      setError("Child account must verify email first. Please check your inbox.");
+      return;
+    }
+
+    if (userData.role === "inactive") {
+      await signOut(auth);
+      setError("Your account is inactive. Please contact support.");
+      return;
+    }
+
+    // 🔹 Redirect by role
+    switch (userData.role) {
+      case "parent":
+        router.push("/");
+        break;
+      case "educator":
+        router.push("/");
+        break;
+      case "child":
+        router.push("/");
+        break;
+      default:
+        router.push("/"); // fallback
+    }
+  } catch (err: any) {
+    console.error(err);
+    setError("Invalid email or password.");
+  }
+};
+
 
   return (
     <section className="bg-white py-20 px-6">

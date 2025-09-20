@@ -22,6 +22,9 @@ export default function RegisterPage() {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [showModal, setShowModal] = useState<"terms" | "privacy" | null>(null);
 
+  // 👇 New: role state
+  const [role, setRole] = useState<"parent" | "educator">("parent");
+
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -38,7 +41,7 @@ export default function RegisterPage() {
     }
 
     try {
-      // 🔹 Create Parent Account
+      // 🔹 Create Account
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         email,
@@ -49,19 +52,19 @@ export default function RegisterPage() {
       await updateProfile(user, { displayName: fullName });
       await sendEmailVerification(user);
 
-      // 🔹 Save as Parent in Firestore
+      // 🔹 Save User in Firestore
       await setDoc(doc(db, "users", user.uid), {
         uid: user.uid,
         fullName,
         email: user.email,
-        role: "parent", // 👈 only parents register
+        role, // 👈 Save selected role
         createdAt: new Date(),
         emailVerified: user.emailVerified,
         plan: "Free Plan",
       });
 
       alert(
-        "Registration successful! Please check your email to verify your account."
+        `Registration successful as ${role}! Please check your email to verify your account.`
       );
       await auth.signOut();
       router.push("/login");
@@ -93,15 +96,34 @@ export default function RegisterPage() {
   return (
     <section className="bg-white py-20 px-6">
       <div className="max-w-md mx-auto text-center">
-        <h1 className="text-4xl font-bold text-pink-600 mb-6">Parent Register</h1>
+        <h1 className="text-4xl font-bold text-pink-600 mb-6">
+          {role === "parent" ? "Parent Register" : "Educator Register"}
+        </h1>
         <p className="text-gray-700 mb-6">
-          Create a free KidFlix parent account to add and manage child profiles.
+          {role === "parent"
+            ? "Create a free KidFlix parent account to add and manage child profiles."
+            : "Create a free KidFlix educator account to share and manage learning content."}
         </p>
 
         <form
           onSubmit={handleSubmit}
           className="bg-white p-6 rounded-xl shadow-md text-left space-y-4 border border-gray-200"
         >
+          {/* Role Selector */}
+          <div>
+            <label className="block text-sm font-medium text-gray-800 mb-1">
+              Register as
+            </label>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value as "parent" | "educator")}
+              className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-pink-400 focus:border-pink-400"
+            >
+              <option value="parent">Parent</option>
+              <option value="educator">Educator</option>
+            </select>
+          </div>
+
           {/* Full Name */}
           <div>
             <label className="block text-sm font-medium text-gray-800 mb-1">
@@ -229,7 +251,7 @@ export default function RegisterPage() {
                 : "bg-pink-600 text-white hover:bg-pink-700"
             }`}
           >
-            Create Parent Account
+            Create {role === "parent" ? "Parent" : "Educator"} Account
           </button>
         </form>
 
@@ -250,15 +272,9 @@ export default function RegisterPage() {
               </h2>
               <div className="text-gray-700 text-sm max-h-96 overflow-y-auto">
                 {showModal === "terms" ? (
-                  <p>
-                    {/* Add terms content */}
-                    Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-                  </p>
+                  <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
                 ) : (
-                  <p>
-                    {/* Add privacy policy content */}
-                    Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-                  </p>
+                  <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
                 )}
               </div>
             </div>
