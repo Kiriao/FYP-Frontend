@@ -10,12 +10,15 @@ import nodemailer from "nodemailer";
 // ------------------------
 let adminApp;
 if (!getApps().length) {
+  if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+    throw new Error("FIREBASE_SERVICE_ACCOUNT environment variable is missing");
+  }
+
+  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
+
   adminApp = initializeApp({
-    credential: cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-    }),
+    credential: cert(serviceAccount),
   });
 } else {
   adminApp = getApp();
@@ -52,7 +55,7 @@ export async function POST(req: NextRequest) {
       parentId,
     });
 
-    // 3️⃣ Create Firestore user document (Admin SDK style)
+    // 3️⃣ Create Firestore user document
     await db.collection("users").doc(userRecord.uid).set({
       fullName: childName,
       email: childEmail,
@@ -63,9 +66,10 @@ export async function POST(req: NextRequest) {
     });
 
     // 4️⃣ Generate email verification link
-    const verificationLink = await authAdmin.generateEmailVerificationLink(childEmail, {
-      url: `${process.env.NEXT_PUBLIC_APP_URL}/login`,
-    });
+    const verificationLink = await authAdmin.generateEmailVerificationLink(
+      childEmail,
+      { url: process.env.NEXT_PUBLIC_APP_URL + "/login" }
+    );
 
     // 5️⃣ Send email via Nodemailer
     const transporter = nodemailer.createTransport({
@@ -88,6 +92,7 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true, childId: userRecord.uid });
+
   } catch (error: any) {
     console.error("Error creating child:", error);
     return NextResponse.json(
