@@ -161,6 +161,14 @@ export default function Navbar() {
                           My Library
                         </Link>
                       )}
+                      {(role === "parent" || role === "educator") && (
+                        <Link
+                          href="/screen-time-management"
+                          className="block px-4 py-2 text-gray-700 hover:bg-gray-100"
+                        >
+                          Screen Time Management
+                        </Link>
+                      )}
                       <button
                         onClick={handleLogout}
                         className="w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100"
