@@ -6,7 +6,7 @@ import Chatbot from "../components/Chatbot";
 import DialogflowMessenger from "../components/DialogflowMessenger";
 import Link from "next/link";
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, MoreHorizontal } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, MoreHorizontal, BookOpen, Play, Check } from 'lucide-react';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, doc, setDoc, deleteDoc, getDocs, addDoc, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
@@ -66,6 +66,31 @@ interface Review {
   createdAt: Timestamp;
 }
 
+// New type for collection items
+interface ContentItem {
+  id: string;
+  title: string;
+  authors: string[];
+  categories: string[];
+  synopsis: string;
+  thumbnail: string;
+  link: string;
+  filename: string;
+}
+
+interface Activity {
+  id: string;
+  userId: string;
+  itemId: string;
+  type: 'book' | 'video';
+  title: string;
+  action: 'read' | 'watched';
+  createdAt: Timestamp;
+  thumbnail?: string;
+  authors?: string[];
+  channel?: string;
+}
+
 const FALLBACK_THUMB = '/images/book-placeholder.png';
 
 const stripTags = (s: string) => s.replace(/<[^>]+>/g, '');
@@ -98,7 +123,7 @@ const videoBucketDisplayNames = {
 
 export default function DiscoverPage() {
   // State
-  const [mode, setMode] = useState<'books' | 'videos'>('books');
+  const [mode, setMode] = useState<'books' | 'videos' | 'collection-books' | 'collection-videos'>('books');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [role, setRole] = useState<string>("");
@@ -116,24 +141,42 @@ export default function DiscoverPage() {
   const [videosPage, setVideosPage] = useState(1);
   const [videosHasMore, setVideosHasMore] = useState(false);
 
+  // Collection state
+  const [collectionItems, setCollectionItems] = useState<ContentItem[]>([]);
+  const [filteredCollectionItems, setFilteredCollectionItems] = useState<ContentItem[]>([]);
+  const [collectionMessage, setCollectionMessage] = useState<string | null>(null);
+
   const pageSize = 20;
 
-  // Auth, Favourites, Reviews, Modal
+  // Auth, Favourites, Reviews, Modal, Activities
   const [user, setUser] = useState<User | null>(null);
   const [favourites, setFavourites] = useState<any[]>([]);
   const [reviewsMap, setReviewsMap] = useState<Record<string, Review[]>>({});
-  const [selectedItem, setSelectedItem] = useState<Book | Video | null>(null); // ← YES, needed
+  const [selectedItem, setSelectedItem] = useState<Book | Video | ContentItem | null>(null);
   const [reviewContent, setReviewContent] = useState('');
   const reviewRef = useRef<HTMLTextAreaElement | null>(null);
+  
+  // Activity tracking state
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [showActivityPanel, setShowActivityPanel] = useState(false);
 
   // Book preview toggle (must be inside component)
   const [showPreview, setShowPreview] = useState(false);
   useEffect(() => { setShowPreview(false); }, [selectedItem]);
 
   // Type guards & helpers
-  const isBook = (item: Book | Video): item is Book => (item as any).id !== undefined;
-  const isVideo = (item: Book | Video): item is Video => (item as any).videoId !== undefined;
-  const getItemId = (item: Book | Video) => (isBook(item) ? item.id : item.videoId);
+  const isBook = (item: Book | Video | ContentItem): item is Book => 
+    (item as any).id !== undefined && (item as any).videoId === undefined && (item as any).filename === undefined;
+  const isVideo = (item: Book | Video | ContentItem): item is Video => 
+    (item as any).videoId !== undefined;
+  const isContentItem = (item: Book | Video | ContentItem): item is ContentItem => 
+    (item as any).filename !== undefined;
+  const getItemId = (item: Book | Video | ContentItem) => {
+    if (isBook(item)) return item.id;
+    if (isVideo(item)) return item.videoId;
+    if (isContentItem(item)) return item.id;
+    return '';
+  };
 
   // Helper functions
   const bestBookUrl = (book: Book): string | null => {
@@ -154,6 +197,160 @@ export default function DiscoverPage() {
       reviewRef.current?.scrollIntoView({ behavior: 'smooth' });
       reviewRef.current?.focus();
     }, 100);
+  };
+
+  // Activity tracking functions
+  const hasActivity = (itemId: string, type: 'book' | 'video'): boolean => {
+    return activities.some(activity => 
+      activity.itemId === itemId && 
+      activity.type === type
+    );
+  };
+
+  const markAsRead = async (book: Book | ContentItem) => {
+    if (!user) return alert('Please log in to track your reading activity.');
+    
+    const itemId = getItemId(book);
+    const activityRef = doc(db, 'users', user.uid, 'activities', itemId);
+    
+    try {
+      const newActivity: Omit<Activity, 'id'> = {
+        userId: user.uid,
+        itemId,
+        type: 'book',
+        title: book.title,
+        action: 'read',
+        createdAt: Timestamp.now(),
+        thumbnail: book.thumbnail,
+        authors: book.authors
+      };
+      
+      await setDoc(activityRef, newActivity);
+      
+      // Update local state
+      const activityWithId: Activity = { ...newActivity, id: itemId };
+      setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === itemId && a.type === 'book'))]);
+      
+    } catch (error) {
+      console.error('Failed to mark book as read:', error);
+      alert('Failed to track reading activity. Please try again.');
+    }
+  };
+
+  const markAsWatched = async (video: Video) => {
+    if (!user) return alert('Please log in to track your viewing activity.');
+    
+    const itemId = video.videoId;
+    const activityRef = doc(db, 'users', user.uid, 'activities', itemId);
+    
+    try {
+      const newActivity: Omit<Activity, 'id'> = {
+        userId: user.uid,
+        itemId,
+        type: 'video',
+        title: video.title,
+        action: 'watched',
+        createdAt: Timestamp.now(),
+        thumbnail: video.thumbnail,
+        channel: video.channel
+      };
+      
+      await setDoc(activityRef, newActivity);
+      
+      // Update local state
+      const activityWithId: Activity = { ...newActivity, id: itemId };
+      setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === itemId && a.type === 'video'))]);
+      
+    } catch (error) {
+      console.error('Failed to mark video as watched:', error);
+      alert('Failed to track viewing activity. Please try again.');
+    }
+  };
+
+  const removeActivity = async (itemId: string, type: 'book' | 'video') => {
+    if (!user) return;
+    
+    const activityRef = doc(db, 'users', user.uid, 'activities', itemId);
+    
+    try {
+      await deleteDoc(activityRef);
+      setActivities(prev => prev.filter(a => !(a.itemId === itemId && a.type === type)));
+    } catch (error) {
+      console.error('Failed to remove activity:', error);
+      alert('Failed to remove activity. Please try again.');
+    }
+  };
+
+  const loadActivities = async (uid: string) => {
+    try {
+      const activitiesRef = collection(db, 'users', uid, 'activities');
+      const q = query(activitiesRef, orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
+      
+      const userActivities: Activity[] = [];
+      snapshot.forEach(doc => {
+        userActivities.push({ id: doc.id, ...doc.data() } as Activity);
+      });
+      
+      setActivities(userActivities);
+    } catch (error) {
+      console.error('Failed to load activities:', error);
+    }
+  };
+
+  // Collection API calls
+  const fetchCollectionItems = async (category: 'books' | 'videos') => {
+    setLoading(true);
+    setCollectionMessage(null);
+
+    try {
+      const res = await fetch(`/api/github/list-files?category=${category}`);
+      const files: { name: string; path: string }[] = await res.json();
+
+      // Fetch file content for each
+      const contentPromises = files.map(async (file) => {
+        const r = await fetch(`/api/github/get-file?path=${encodeURIComponent(file.path)}`);
+        const data = await r.json();
+        return {
+          id: data.id || file.name, // fallback to filename if id missing
+          title: data.title || "No Title",
+          authors: data.authors || [],
+          categories: data.categories || [],
+          synopsis: data.synopsis || "",
+          thumbnail: data.thumbnail || "",
+          link: data.link || "#",
+          filename: file.name,
+        };
+      });
+
+      const results = await Promise.all(contentPromises);
+      setCollectionItems(results);
+      setFilteredCollectionItems(results);
+    } catch (err: any) {
+      console.error(err);
+      setCollectionMessage("❌ Failed to fetch items: " + err.message);
+      setCollectionItems([]);
+      setFilteredCollectionItems([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter collection items based on search query
+  const filterCollectionItems = () => {
+    if (!searchQuery.trim()) {
+      setFilteredCollectionItems(collectionItems);
+      return;
+    }
+
+    const query = searchQuery.toLowerCase();
+    const filtered = collectionItems.filter(item => 
+      item.title.toLowerCase().includes(query) ||
+      item.authors.some(author => author.toLowerCase().includes(query)) ||
+      item.categories.some(cat => cat.toLowerCase().includes(query)) ||
+      item.synopsis.toLowerCase().includes(query)
+    );
+    setFilteredCollectionItems(filtered);
   };
 
   // API calls
@@ -217,28 +414,21 @@ export default function DiscoverPage() {
             setRole("");
           }
           loadFavourites(u.uid);
+          loadActivities(u.uid);
         } catch (err) {
-          console.error("Failed to load user role:", err);
+          console.error("Failed to load user data:", err);
           setRole("");
         }
       } else {
         setRole("");
         setFavourites([]);
+        setActivities([]);
       }
     });
     return () => unsub();
   }, []);
 
   // Favourites & Reviews & Reports
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      if (u) loadFavourites(u.uid);
-      else setFavourites([]);
-    });
-    return () => unsub();
-  }, []);
-
   async function loadFavourites(uid: string) {
     const snap = await getDocs(collection(db, 'users', uid, 'favourites'));
     const favs: any[] = [];
@@ -250,7 +440,7 @@ export default function DiscoverPage() {
     return favourites.some((f) => f.id === id && f.type === type);
   }
 
-  async function toggleFavourite(item: Book | Video, type: 'book' | 'video') {
+  async function toggleFavourite(item: Book | Video | ContentItem, type: 'book' | 'video') {
     if (!user) return alert('Please log in to favourite items.');
     const key = getItemId(item);
     const exists = favourites.find((f) => f.id === key && f.type === type);
@@ -262,7 +452,7 @@ export default function DiscoverPage() {
     } else {
       const newFav: any = { id: key, type, title: (item as any).title || '' };
       if ((item as any).thumbnail) newFav.thumbnail = (item as any).thumbnail;
-      if (isBook(item) && (item as Book).authors) newFav.authors = (item as Book).authors;
+      if ((isBook(item) || isContentItem(item)) && (item as any).authors) newFav.authors = (item as any).authors;
       if (isVideo(item) && (item as Video).channel) newFav.channel = (item as Video).channel;
       if (isBook(item) && (item as Book).infoLink) newFav.infoLink = (item as Book).infoLink;
 
@@ -274,11 +464,12 @@ export default function DiscoverPage() {
   async function submitReview() {
     if (!user || !selectedItem) return;
     const key = getItemId(selectedItem);
+    const itemType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
     await addDoc(collection(db, 'books-video-reviews'), {
       userId: user.uid,
       userName: user.displayName || 'Anonymous',
       itemId: key,
-      type: mode === 'books' ? 'book' : 'video',
+      type: itemType,
       title: (selectedItem as any).title,
       content: reviewContent,
       createdAt: Timestamp.now(),
@@ -313,7 +504,7 @@ export default function DiscoverPage() {
     alert('Review reported. Admin will check it.');
   }
 
-  async function reportContent(item: Book | Video, type: 'book' | 'video') {
+  async function reportContent(item: Book | Video | ContentItem, type: 'book' | 'video') {
     if (!user) return alert('Please log in to report content.');
     const reason = prompt('Why are you reporting this content? (optional)');
     if (reason === null) return;
@@ -331,10 +522,21 @@ export default function DiscoverPage() {
   useEffect(() => {
     if (mode === 'books') {
       searchBooks();
-    } else {
+    } else if (mode === 'videos') {
       searchVideos();
+    } else if (mode === 'collection-books') {
+      fetchCollectionItems('books');
+    } else if (mode === 'collection-videos') {
+      fetchCollectionItems('videos');
     }
   }, [mode, booksPage, videosPage, bucket, videoBucket]);
+
+  // Filter collection items when search query changes for collection modes
+  useEffect(() => {
+    if (mode === 'collection-books' || mode === 'collection-videos') {
+      filterCollectionItems();
+    }
+  }, [searchQuery, collectionItems, mode]);
 
   // Initial search
   useEffect(() => {
@@ -354,16 +556,19 @@ export default function DiscoverPage() {
     setVideosPage(1);
     if (mode === 'books') {
       searchBooks();
-    } else {
+    } else if (mode === 'videos') {
       searchVideos();
+    } else if (mode === 'collection-books' || mode === 'collection-videos') {
+      filterCollectionItems();
     }
   };
 
-  const handleModeChange = (newMode: 'books' | 'videos') => {
+  const handleModeChange = (newMode: 'books' | 'videos' | 'collection-books' | 'collection-videos') => {
     setMode(newMode);
+    setSearchQuery(''); // Clear search when switching modes
     if (newMode === 'books') {
       setBooksPage(1);
-    } else {
+    } else if (newMode === 'videos') {
       setVideosPage(1);
     }
   };
@@ -442,7 +647,7 @@ export default function DiscoverPage() {
   const VideosPagination = () => {
     const windowSize = 9;
     const start = videosPage;
-       const end = videosPage + windowSize - 1;
+    const end = videosPage + windowSize - 1;
 
     const pages = [] as number[];
     for (let i = start; i <= end; i++) pages.push(i);
@@ -479,10 +684,108 @@ export default function DiscoverPage() {
     );
   };
 
+  // Get current items to display
+  const getCurrentItems = () => {
+    switch (mode) {
+      case 'books':
+        return books;
+      case 'videos':
+        return videos;
+      case 'collection-books':
+      case 'collection-videos':
+        return filteredCollectionItems;
+      default:
+        return [];
+    }
+  };
+
+  // Get search placeholder text
+  const getSearchPlaceholder = () => {
+    switch (mode) {
+      case 'books':
+        return "Search titles/topics (optional) e.g. dinosaurs, space…";
+      case 'videos':
+        return "Search video titles/topics (optional) e.g. animals, math…";
+      case 'collection-books':
+        return "Search our book collection by title, author, or category…";
+      case 'collection-videos':
+        return "Search our video collection by title, author, or category…";
+      default:
+        return "Search…";
+    }
+  };
+
   return (
     <main className="bg-white">
       <div className="max-w-6xl mx-auto p-6 font-sans text-gray-900">
-        <h1 className="text-2xl font-bold mb-3">Discover Books & Videos for Kids</h1>
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="text-2xl font-bold">Discover Books & Videos for Kids</h1>
+          
+          {/* Activity Panel Toggle */}
+          {user && (
+            <button
+              onClick={() => setShowActivityPanel(!showActivityPanel)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+            >
+              <BookOpen className="w-4 h-4" />
+              My Activity ({activities.length})
+            </button>
+          )}
+        </div>
+
+        {/* Activity Panel */}
+        {showActivityPanel && user && (
+          <div className="mb-6 bg-gray-50 rounded-xl p-4 border">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold">Recent Activity</h2>
+              <button
+                onClick={() => setShowActivityPanel(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ×
+              </button>
+            </div>
+            
+            {activities.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-64 overflow-y-auto">
+                {activities.slice(0, 12).map((activity) => (
+                  <div key={`${activity.itemId}-${activity.type}`} className="bg-white rounded-lg p-3 border border-gray-200">
+                    <div className="flex items-start gap-3">
+                      <img
+                        src={activity.thumbnail || FALLBACK_THUMB}
+                        alt={activity.title}
+                        className="w-12 h-16 object-cover rounded bg-gray-100 flex-shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-medium text-sm line-clamp-2">{activity.title}</h3>
+                        <p className="text-xs text-gray-600 mt-1">
+                          {activity.type === 'book' 
+                            ? activity.authors?.join(', ') || 'Unknown author'
+                            : activity.channel
+                          }
+                        </p>
+                        <div className="flex items-center justify-between mt-2">
+                          <span className="text-xs text-green-600 flex items-center gap-1">
+                            <Check className="w-3 h-3" />
+                            {activity.action === 'read' ? 'Read' : 'Watched'}
+                          </span>
+                          <button
+                            onClick={() => removeActivity(activity.itemId, activity.type)}
+                            className="text-xs text-red-500 hover:text-red-700"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-600 text-center py-4">No activity yet. Start reading books or watching videos!</p>
+            )}
+          </div>
+        )}
 
         {/* Search Bar */}
         <div className="flex gap-2 mb-3">
@@ -492,7 +795,7 @@ export default function DiscoverPage() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Search titles/topics (optional) e.g. dinosaurs, space…"
+              placeholder={getSearchPlaceholder()}
               className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
@@ -507,7 +810,7 @@ export default function DiscoverPage() {
         </div>
 
         {/* Mode Tabs */}
-        <div className="flex gap-2 mb-4">
+        <div className="flex gap-2 mb-4 flex-wrap">
           <button
             onClick={() => handleModeChange('books')}
             className={`px-4 py-2 rounded-lg ${mode === 'books' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
@@ -520,9 +823,21 @@ export default function DiscoverPage() {
           >
             Videos
           </button>
+          <button
+            onClick={() => handleModeChange('collection-books')}
+            className={`px-4 py-2 rounded-lg ${mode === 'collection-books' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          >
+            Our Collection Books
+          </button>
+          <button
+            onClick={() => handleModeChange('collection-videos')}
+            className={`px-4 py-2 rounded-lg ${mode === 'collection-videos' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          >
+            Our Video Collection
+          </button>
         </div>
 
-        {/* Video chips */}
+        {/* Video chips - only show for external videos */}
         {mode === 'videos' && (
           <div className="flex flex-wrap gap-2 mb-6">
             {Object.entries(videoBucketDisplayNames).map(([key, label]) => (
@@ -537,7 +852,7 @@ export default function DiscoverPage() {
           </div>
         )}
 
-        {/* Book chips */}
+        {/* Book chips - only show for external books */}
         {mode === 'books' && (
           <div className="flex flex-wrap gap-2 mb-6">
             <button
@@ -561,16 +876,30 @@ export default function DiscoverPage() {
         {/* Loading */}
         {loading && <div className="text-center py-8 text-gray-600">Loading...</div>}
 
+        {/* Collection Error Message */}
+        {collectionMessage && (
+          <div className="text-center py-4 text-red-500 font-medium">{collectionMessage}</div>
+        )}
+
         {/* Results */}
         {!loading && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-6">
-            {mode === 'books'
-              ? books.map((book) => (
+            {getCurrentItems().map((item, index) => {
+              if (mode === 'books' && isBook(item)) {
+                const book = item as Book;
+                return (
                   <div
                     key={book.id}
-                    className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md"
+                    className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md relative"
                     onClick={() => setSelectedItem(book)}
                   >
+                    {/* Activity indicator */}
+                    {hasActivity(book.id, 'book') && (
+                      <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1 z-10">
+                        <Check className="w-3 h-3" />
+                      </div>
+                    )}
+                    
                     <img
                       src={book.thumbnail || FALLBACK_THUMB}
                       alt={book.title}
@@ -593,15 +922,41 @@ export default function DiscoverPage() {
                           ))}
                         </div>
                       )}
+                      
+                      {/* Quick action buttons */}
+                      {user && (
+                        <div className="flex gap-1 mt-2" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => markAsRead(book)}
+                            className={`text-xs px-2 py-1 rounded border ${
+                              hasActivity(book.id, 'book') 
+                                ? 'bg-green-100 text-green-700 border-green-300' 
+                                : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-green-50'
+                            }`}
+                          >
+                            <BookOpen className="w-3 h-3 inline mr-1" />
+                            {hasActivity(book.id, 'book') ? 'Read' : 'Mark as Read'}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
-                ))
-              : videos.map((video, index) => (
+                );
+              } else if (mode === 'videos' && isVideo(item)) {
+                const video = item as Video;
+                return (
                   <div
                     key={`${video.videoId}-${index}`}
-                    className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md"
+                    className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md relative"
                     onClick={() => setSelectedItem(video)}
                   >
+                    {/* Activity indicator */}
+                    {hasActivity(video.videoId, 'video') && (
+                      <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1 z-10">
+                        <Check className="w-3 h-3" />
+                      </div>
+                    )}
+                    
                     {video.thumbnail && (
                       <img
                         src={video.thumbnail}
@@ -612,21 +967,100 @@ export default function DiscoverPage() {
                     <div className="flex-1">
                       <h3 className="font-semibold text-sm line-clamp-2">{video.title}</h3>
                       {video.channel && <p className="text-xs text-gray-600 mt-1">{video.channel}</p>}
+                      
+                      {/* Quick action buttons */}
+                      {user && (
+                        <div className="flex gap-1 mt-2" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => markAsWatched(video)}
+                            className={`text-xs px-2 py-1 rounded border ${
+                              hasActivity(video.videoId, 'video') 
+                                ? 'bg-green-100 text-green-700 border-green-300' 
+                                : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-green-50'
+                            }`}
+                          >
+                            <Play className="w-3 h-3 inline mr-1" />
+                            {hasActivity(video.videoId, 'video') ? 'Watched' : 'Mark as Watched'}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
-                ))}
+                );
+              } else if ((mode === 'collection-books' || mode === 'collection-videos') && isContentItem(item)) {
+                const contentItem = item as ContentItem;
+                return (
+                  <div
+                    key={`${contentItem.id}-${index}`}
+                    className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md relative"
+                    onClick={() => setSelectedItem(contentItem)}
+                  >
+                    {/* Activity indicator for collection books */}
+                    {mode === 'collection-books' && hasActivity(contentItem.id, 'book') && (
+                      <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1 z-10">
+                        <Check className="w-3 h-3" />
+                      </div>
+                    )}
+                    
+                    <img
+                      src={contentItem.thumbnail || FALLBACK_THUMB}
+                      alt={contentItem.title}
+                      className="w-full h-40 object-cover rounded-lg bg-gray-100"
+                    />
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-sm line-clamp-2">{contentItem.title}</h3>
+                      <p className="text-xs text-gray-600 mt-1">
+                        {contentItem.authors.length > 0 ? contentItem.authors.join(', ') : 'Unknown author'}
+                      </p>
+                      {contentItem.categories && contentItem.categories.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {contentItem.categories.map((category) => (
+                            <span
+                              key={category}
+                              className="text-xs bg-blue-100 border border-blue-300 rounded-full px-2 py-0.5"
+                            >
+                              {category}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      
+                      {/* Quick action buttons for collection books */}
+                      {user && mode === 'collection-books' && (
+                        <div className="flex gap-1 mt-2" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => markAsRead(contentItem)}
+                            className={`text-xs px-2 py-1 rounded border ${
+                              hasActivity(contentItem.id, 'book') 
+                                ? 'bg-green-100 text-green-700 border-green-300' 
+                                : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-green-50'
+                            }`}
+                          >
+                            <BookOpen className="w-3 h-3 inline mr-1" />
+                            {hasActivity(contentItem.id, 'book') ? 'Read' : 'Mark as Read'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })}
           </div>
         )}
 
         {/* No Results */}
-        {!loading && mode === 'books' && books.length === 0 && (
-          <div className="text-center py-8 text-gray-600">No books found.</div>
-        )}
-        {!loading && mode === 'videos' && videos.length === 0 && (
-          <div className="text-center py-8 text-gray-600">No videos found.</div>
+        {!loading && getCurrentItems().length === 0 && !collectionMessage && (
+          <div className="text-center py-8 text-gray-600">
+            {mode === 'books' && 'No books found.'}
+            {mode === 'videos' && 'No videos found.'}
+            {mode === 'collection-books' && 'No books found in our collection.'}
+            {mode === 'collection-videos' && 'No videos found in our collection.'}
+          </div>
         )}
 
-        {/* Pagination */}
+        {/* Pagination - only for external content */}
         {!loading && (
           <>
             {mode === 'books' && books.length > 0 && <BooksPagination />}
@@ -647,32 +1081,48 @@ export default function DiscoverPage() {
             {/* Title */}
             <h2 className="text-xl font-bold mb-2">{(selectedItem as any).title}</h2>
 
-            {isBook(selectedItem) && (
+            {(isBook(selectedItem) || isContentItem(selectedItem)) && (
               <>
                 {/* Top: cover + meta */}
                 <div className="flex gap-4 mb-4">
                   <img
-                    src={selectedItem.thumbnail || FALLBACK_THUMB}
-                    alt={`${selectedItem.title} cover`}
+                    src={(selectedItem as any).thumbnail || FALLBACK_THUMB}
+                    alt={`${(selectedItem as any).title} cover`}
                     className="w-20 h-28 sm:w-24 sm:h-32 object-cover rounded-lg shadow-sm bg-gray-100 flex-shrink-0"
                   />
                   <div className="min-w-0">
-                    {selectedItem.authors?.length ? (
-                      <p className="text-xs text-gray-600">{selectedItem.authors.join(', ')}</p>
+                    {(selectedItem as any).authors?.length ? (
+                      <p className="text-xs text-gray-600">{(selectedItem as any).authors.join(', ')}</p>
                     ) : null}
-                    {selectedItem.categories?.length ? (
+                    {isBook(selectedItem) && selectedItem.categories?.length ? (
                       <p className="text-[11px] text-gray-500 mt-1">{selectedItem.categories.join(', ')}</p>
                     ) : null}
+                    {isContentItem(selectedItem) && selectedItem.categories?.length ? (
+                      <p className="text-[11px] text-gray-500 mt-1">{selectedItem.categories.join(', ')}</p>
+                    ) : null}
+                    
+                    {/* Activity status in modal */}
+                    {((isBook(selectedItem) && hasActivity(selectedItem.id, 'book')) || 
+                      (isContentItem(selectedItem) && hasActivity(selectedItem.id, 'book'))) && (
+                      <div className="mt-2 inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
+                        <Check className="w-3 h-3" />
+                        Read
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {/* Description */}
                 <p className="text-sm text-[#444] leading-6 mb-3">
-                  {selectedItem.snippet ?? selectedItem.synopsis ?? 'No description available.'}
+                  {isBook(selectedItem) 
+                    ? (selectedItem.snippet ?? selectedItem.synopsis ?? 'No description available.')
+                    : isContentItem(selectedItem) 
+                    ? (selectedItem.synopsis || 'No description available.')
+                    : 'No description available.'}
                 </p>
 
-                {/* Read sample toggle */}
-                {selectedItem.id && (
+                {/* Read sample toggle - for external books */}
+                {isBook(selectedItem) && selectedItem.id && (
                   <div className="mb-4">
                     <button
                       onClick={() => setShowPreview(s => !s)}
@@ -703,15 +1153,64 @@ export default function DiscoverPage() {
                   </div>
                 )}
 
-                {/* External link (optional) */}
-                {bestBookUrl(selectedItem) && (
+                {/* Read sample toggle - for collection books */}
+                {isContentItem(selectedItem) && mode === 'collection-books' && selectedItem.link && selectedItem.link !== '#' && (
+                  <div className="mb-4">
+                    <button
+                      onClick={() => setShowPreview(s => !s)}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50"
+                    >
+                      {showPreview ? 'Hide preview' : 'Read sample'}
+                      <svg className={`w-4 h-4 transition-transform ${showPreview ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/>
+                      </svg>
+                    </button>
+
+                    {showPreview && (
+                      <div className="mt-3 rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-gray-50">
+                        {/* Portrait-ish aspect for books */}
+                        <div className="relative pt-[133.33%] sm:pt-[100%]">
+                          <iframe
+                            src={selectedItem.link}
+                            title={`${selectedItem.title} — preview`}
+                            className="absolute inset-0 w-full h-full"
+                            allowFullScreen
+                            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                          />
+                        </div>
+                        <div className="p-2 text-[11px] text-gray-500">
+                          Preview loaded from: {new URL(selectedItem.link).hostname}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* External link for books */}
+                {isBook(selectedItem) && bestBookUrl(selectedItem) && (
                   <a
                     href={bestBookUrl(selectedItem)!}
                     target="_blank"
                     rel="noopener"
-                    className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800"
+                    className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 mb-3"
                   >
                     View on Google Books
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M12.293 2.293a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L14 5.414V14a1 1 0 11-2 0V5.414L9.707 7.707A1 1 0 118.293 6.293l4-4z"/>
+                      <path d="M3 9a1 1 0 011-1h4a1 1 0 110 2H5v6h10v-3a1 1 0 112 0v4a1 1 0 01-1 1H4a1 1 0 01-1-1V9z"/>
+                    </svg>
+                  </a>
+                )}
+
+                {/* External link for collection items */}
+                {isContentItem(selectedItem) && selectedItem.link && selectedItem.link !== '#' && (
+                  <a
+                    href={selectedItem.link}
+                    target="_blank"
+                    rel="noopener"
+                    className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 mb-3"
+                  >
+                    View External Link
                     <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                       <path d="M12.293 2.293a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L14 5.414V14a1 1 0 11-2 0V5.414L9.707 7.707A1 1 0 118.293 6.293l4-4z"/>
                       <path d="M3 9a1 1 0 011-1h4a1 1 0 110 2H5v6h10v-3a1 1 0 112 0v4a1 1 0 01-1 1H4a1 1 0 01-1-1V9z"/>
@@ -746,6 +1245,14 @@ export default function DiscoverPage() {
                     {selectedItem.publishedAt && (
                       <span className="ml-2 text-gray-500">• {fmtDate(selectedItem.publishedAt)}</span>
                     )}
+                    
+                    {/* Activity status in modal */}
+                    {hasActivity(selectedItem.videoId, 'video') && (
+                      <div className="ml-2 inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
+                        <Check className="w-3 h-3" />
+                        Watched
+                      </div>
+                    )}
                   </div>
                   <span className="px-2 py-0.5 rounded-full border border-gray-200 bg-gray-50 text-xs">
                     {videoBucketDisplayNames[videoBucket]}
@@ -763,7 +1270,7 @@ export default function DiscoverPage() {
                     href={selectedItem.url || `https://www.youtube.com/watch?v=${selectedItem.videoId}`}
                     target="_blank"
                     rel="noopener"
-                    className="text-blue-600 hover:text-blue-800 text-sm"
+                    className="text-blue-600 hover:text-blue-800 text-sm mb-3 block"
                   >
                     Watch on YouTube
                   </a>
@@ -777,11 +1284,63 @@ export default function DiscoverPage() {
             <div className="flex flex-col gap-2 mb-3">
               {user && (
                 <>
+                  {/* Activity tracking buttons */}
+                  {isBook(selectedItem) && (
+                    <button
+                      onClick={() => hasActivity(selectedItem.id, 'book') 
+                        ? removeActivity(selectedItem.id, 'book')
+                        : markAsRead(selectedItem)
+                      }
+                      className={`px-3 py-2 rounded-lg border flex items-center gap-2 ${
+                        hasActivity(selectedItem.id, 'book')
+                          ? 'bg-green-100 text-green-700 border-green-300'
+                          : 'border-gray-300 hover:bg-green-50'
+                      }`}
+                    >
+                      <BookOpen className="w-4 h-4" />
+                      {hasActivity(selectedItem.id, 'book') ? 'Mark as Unread' : 'Mark as Read'}
+                    </button>
+                  )}
+                  
+                  {isContentItem(selectedItem) && mode === 'collection-books' && (
+                    <button
+                      onClick={() => hasActivity(selectedItem.id, 'book') 
+                        ? removeActivity(selectedItem.id, 'book')
+                        : markAsRead(selectedItem)
+                      }
+                      className={`px-3 py-2 rounded-lg border flex items-center gap-2 ${
+                        hasActivity(selectedItem.id, 'book')
+                          ? 'bg-green-100 text-green-700 border-green-300'
+                          : 'border-gray-300 hover:bg-green-50'
+                      }`}
+                    >
+                      <BookOpen className="w-4 h-4" />
+                      {hasActivity(selectedItem.id, 'book') ? 'Mark as Unread' : 'Mark as Read'}
+                    </button>
+                  )}
+                  
+                  {isVideo(selectedItem) && (
+                    <button
+                      onClick={() => hasActivity(selectedItem.videoId, 'video')
+                        ? removeActivity(selectedItem.videoId, 'video')
+                        : markAsWatched(selectedItem)
+                      }
+                      className={`px-3 py-2 rounded-lg border flex items-center gap-2 ${
+                        hasActivity(selectedItem.videoId, 'video')
+                          ? 'bg-green-100 text-green-700 border-green-300'
+                          : 'border-gray-300 hover:bg-green-50'
+                      }`}
+                    >
+                      <Play className="w-4 h-4" />
+                      {hasActivity(selectedItem.videoId, 'video') ? 'Mark as Unwatched' : 'Mark as Watched'}
+                    </button>
+                  )}
+                  
                   <button
-                    onClick={() => toggleFavourite(selectedItem, mode === 'books' ? 'book' : 'video')}
+                    onClick={() => toggleFavourite(selectedItem, (mode === 'books' || mode === 'collection-books') ? 'book' : 'video')}
                     className="px-3 py-1 rounded-lg border"
                   >
-                    {isFavourite(getItemId(selectedItem), mode === 'books' ? 'book' : 'video')
+                    {isFavourite(getItemId(selectedItem), (mode === 'books' || mode === 'collection-books') ? 'book' : 'video')
                       ? '★ Remove Favourite'
                       : '☆ Add Favourite'}
                   </button>
@@ -789,44 +1348,13 @@ export default function DiscoverPage() {
                     Leave Review
                   </button>
                   <button
-                    onClick={() => reportContent(selectedItem, mode === 'books' ? 'book' : 'video')}
+                    onClick={() => reportContent(selectedItem, (mode === 'books' || mode === 'collection-books') ? 'book' : 'video')}
                     className="px-3 py-1 rounded-lg border text-red-600"
                   >
                     Report Content
                   </button>
                 </>
               )}
-
-              {/* External links */}
-{/*               {["admin", "user"].includes(role?.toLowerCase()) && (
-                <>
-                  {isBook(selectedItem) && bestBookUrl(selectedItem) && (
-                    <a
-                      href={bestBookUrl(selectedItem)!}
-                      target="_blank"
-                      rel="noopener"
-                      className="text-blue-600 hover:text-blue-800 text-sm"
-                    >
-                      View on Google Books
-                    </a>
-                  )}
-                </>
-              )} */}
-
-{/*               {["admin", "user"].includes(role?.toLowerCase()) && (
-                <>
-                  {isVideo(selectedItem) && (
-                    <a
-                      href={selectedItem.url || `https://www.youtube.com/watch?v=${selectedItem.videoId}`}
-                      target="_blank"
-                      rel="noopener"
-                      className="text-blue-600 hover:text-blue-800 text-sm"
-                    >
-                      Watch on YouTube
-                    </a>
-                  )}
-                </>
-              )} */}
             </div>
 
             {/* Reviews */}
