@@ -145,7 +145,7 @@ export default function Navbar() {
                           Payment History
                         </Link>
                       )}
-                      {(role === "admin" || role === "user") && (
+                      {(role === "admin" || role === "parent" || role === "child" || role === "educator" || role === "student") && (
                         <Link
                           href="/favourites"
                           className="block px-4 py-2 text-gray-700 hover:bg-gray-100"
