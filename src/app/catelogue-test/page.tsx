@@ -2,16 +2,15 @@
 'use client';
 
 import { getDoc } from "firebase/firestore";
-import Chatbot from "../components/Chatbot";
 import DialogflowMessenger from "../components/DialogflowMessenger";
 import Link from "next/link";
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, MoreHorizontal, BookOpen, Play, Check } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, MoreHorizontal, BookOpen, Play, Check, Clock, Shield, AlertCircle } from 'lucide-react';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, doc, setDoc, deleteDoc, getDocs, addDoc, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
 
-// Types
+// Types (keeping existing types and adding new ones)
 interface Book {
   id: string;
   title: string;
@@ -66,7 +65,6 @@ interface Review {
   createdAt: Timestamp;
 }
 
-// New type for collection items
 interface ContentItem {
   id: string;
   title: string;
@@ -91,6 +89,27 @@ interface Activity {
   channel?: string;
 }
 
+// NEW: Screen Time Types
+interface ScreenTimeSettings {
+  dailyLimit: number;
+  videoLimit: number;
+  bookLimit: number;
+  bedtimeStart: string;
+  bedtimeEnd: string;
+  weekendExtension: number;
+  enabled: boolean;
+}
+
+interface UsageData {
+  date: string;
+  videoMinutes: number;
+  bookMinutes: number;
+  totalMinutes: number;
+  lastActivity: Timestamp;
+}
+
+type ScreenTimeStatus = 'within-limits' | 'approaching-limit' | 'limit-exceeded' | 'bedtime' | 'disabled';
+
 const FALLBACK_THUMB = '/images/book-placeholder.png';
 
 const stripTags = (s: string) => s.replace(/<[^>]+>/g, '');
@@ -110,7 +129,6 @@ const bucketDisplayNames = {
   young_adult: 'Young Adult',
 };
 
-// labels for the video shelves (used for chips)
 const videoBucketDisplayNames = {
   stories:  'Stories',
   songs:    'Songs & Rhymes',
@@ -122,7 +140,7 @@ const videoBucketDisplayNames = {
 } as const;
 
 export default function DiscoverPage() {
-  // State
+  // State (keeping existing state and adding new screen time state)
   const [mode, setMode] = useState<'books' | 'videos' | 'collection-books' | 'collection-videos'>('books');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -160,11 +178,18 @@ export default function DiscoverPage() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [showActivityPanel, setShowActivityPanel] = useState(false);
 
-  // Book preview toggle (must be inside component)
+  // Book preview toggle
   const [showPreview, setShowPreview] = useState(false);
   useEffect(() => { setShowPreview(false); }, [selectedItem]);
 
-  // Type guards & helpers
+  // NEW: Screen Time State
+  const [screenTimeSettings, setScreenTimeSettings] = useState<ScreenTimeSettings | null>(null);
+  const [currentUsage, setCurrentUsage] = useState<UsageData | null>(null);
+  const [screenTimeStatus, setScreenTimeStatus] = useState<ScreenTimeStatus>('within-limits');
+  const [screenTimeMessage, setScreenTimeMessage] = useState<string | null>(null);
+  const [sessionStartTime, setSessionStartTime] = useState<Date>(new Date());
+
+  // Type guards & helpers (keeping existing ones)
   const isBook = (item: Book | Video | ContentItem): item is Book => 
     (item as any).id !== undefined && (item as any).videoId === undefined && (item as any).filename === undefined;
   const isVideo = (item: Book | Video | ContentItem): item is Video => 
@@ -178,7 +203,162 @@ export default function DiscoverPage() {
     return '';
   };
 
-  // Helper functions
+  // NEW: Screen Time Helper Functions
+  const parseTime = (timeString: string): number => {
+    const [hours, minutes] = timeString.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+
+  const isInBedtime = (settings: ScreenTimeSettings): boolean => {
+    const now = new Date();
+    const currentTime = now.getHours() * 60 + now.getMinutes();
+    const bedtimeStart = parseTime(settings.bedtimeStart);
+    const bedtimeEnd = parseTime(settings.bedtimeEnd);
+
+    if (bedtimeStart > bedtimeEnd) {
+      // Overnight bedtime (e.g., 22:00 to 07:00)
+      return currentTime >= bedtimeStart || currentTime <= bedtimeEnd;
+    } else {
+      // Same day bedtime (e.g., 14:00 to 16:00)
+      return currentTime >= bedtimeStart && currentTime <= bedtimeEnd;
+    }
+  };
+
+  const calculateScreenTimeStatus = (settings: ScreenTimeSettings, usage: UsageData): ScreenTimeStatus => {
+    if (!settings.enabled) return 'disabled';
+
+    if (isInBedtime(settings)) return 'bedtime';
+
+    const now = new Date();
+    const isWeekend = now.getDay() === 0 || now.getDay() === 6;
+    const effectiveDailyLimit = settings.dailyLimit + (isWeekend ? settings.weekendExtension : 0);
+
+    if (usage.totalMinutes >= effectiveDailyLimit) {
+      return 'limit-exceeded';
+    } else if (usage.totalMinutes >= effectiveDailyLimit * 0.8) {
+      return 'approaching-limit';
+    }
+
+    return 'within-limits';
+  };
+
+  const canAccessContent = (contentType: 'book' | 'video'): boolean => {
+    if (!screenTimeSettings || !screenTimeSettings.enabled) return true;
+    if (screenTimeStatus === 'bedtime') return false;
+    if (screenTimeStatus === 'limit-exceeded') return false;
+    
+    // Check specific content type limits
+    if (contentType === 'video' && currentUsage) {
+      return currentUsage.videoMinutes < screenTimeSettings.videoLimit;
+    }
+
+    return true;
+  };
+
+  const getScreenTimeMessage = (): string | null => {
+    if (!screenTimeSettings || !screenTimeSettings.enabled) return null;
+    
+    switch (screenTimeStatus) {
+      case 'bedtime':
+        return `Content is blocked during bedtime hours (${screenTimeSettings.bedtimeStart} - ${screenTimeSettings.bedtimeEnd}).`;
+      case 'limit-exceeded':
+        return `Daily screen time limit reached. Try again tomorrow or ask a parent to extend your time.`;
+      case 'approaching-limit':
+        return `You're approaching your daily screen time limit. Consider taking a break soon.`;
+      default:
+        return null;
+    }
+  };
+
+  const formatMinutes = (minutes: number): string => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours > 0) {
+      return `${hours}h ${mins}m`;
+    }
+    return `${mins}m`;
+  };
+
+  // NEW: Screen Time Functions
+  const loadScreenTimeSettings = async (uid: string) => {
+    try {
+      const settingsDoc = await getDoc(doc(db, "users", uid, "settings", "screenTime"));
+      if (settingsDoc.exists()) {
+        const settings = settingsDoc.data() as ScreenTimeSettings;
+        setScreenTimeSettings(settings);
+        return settings;
+      }
+    } catch (error) {
+      console.error("Failed to load screen time settings:", error);
+    }
+    return null;
+  };
+
+  const loadTodayUsage = async (uid: string) => {
+    const today = new Date().toISOString().split('T')[0];
+    try {
+      const usageDoc = await getDoc(doc(db, "users", uid, "usage", today));
+      if (usageDoc.exists()) {
+        const usage = usageDoc.data() as UsageData;
+        setCurrentUsage(usage);
+        return usage;
+      } else {
+        const newUsage: UsageData = {
+          date: today,
+          videoMinutes: 0,
+          bookMinutes: 0,
+          totalMinutes: 0,
+          lastActivity: Timestamp.now(),
+        };
+        setCurrentUsage(newUsage);
+        return newUsage;
+      }
+    } catch (error) {
+      console.error("Failed to load usage data:", error);
+      const fallbackUsage: UsageData = {
+        date: today,
+        videoMinutes: 0,
+        bookMinutes: 0,
+        totalMinutes: 0,
+        lastActivity: Timestamp.now(),
+      };
+      setCurrentUsage(fallbackUsage);
+      return fallbackUsage;
+    }
+  };
+
+  const updateUsage = async (uid: string, contentType: 'book' | 'video', minutes: number) => {
+    if (!currentUsage) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    const updatedUsage: UsageData = {
+      ...currentUsage,
+      [contentType === 'video' ? 'videoMinutes' : 'bookMinutes']: 
+        currentUsage[contentType === 'video' ? 'videoMinutes' : 'bookMinutes'] + minutes,
+      totalMinutes: currentUsage.totalMinutes + minutes,
+      lastActivity: Timestamp.now(),
+    };
+
+    try {
+      await setDoc(doc(db, "users", uid, "usage", today), updatedUsage);
+      setCurrentUsage(updatedUsage);
+    } catch (error) {
+      console.error("Failed to update usage:", error);
+    }
+  };
+
+  // NEW: Track session time for content consumption
+  const trackContentSession = async (contentType: 'book' | 'video') => {
+    if (!user || !screenTimeSettings?.enabled) return;
+
+    const sessionDuration = Math.floor((new Date().getTime() - sessionStartTime.getTime()) / (1000 * 60)); // minutes
+    if (sessionDuration > 0) {
+      await updateUsage(user.uid, contentType, sessionDuration);
+    }
+    setSessionStartTime(new Date());
+  };
+
+  // Helper functions (keeping existing ones)
   const bestBookUrl = (book: Book): string | null => {
     return (
       book.previewLink ||
@@ -199,7 +379,7 @@ export default function DiscoverPage() {
     }, 100);
   };
 
-  // Activity tracking functions
+  // Activity tracking functions (keeping existing ones)
   const hasActivity = (itemId: string, type: 'book' | 'video'): boolean => {
     return activities.some(activity => 
       activity.itemId === itemId && 
@@ -210,6 +390,12 @@ export default function DiscoverPage() {
   const markAsRead = async (book: Book | ContentItem) => {
     if (!user) return alert('Please log in to track your reading activity.');
     
+    // Check screen time restrictions for books
+    if (book && !canAccessContent('book')) {
+      alert(getScreenTimeMessage() || 'Content access is restricted.');
+      return;
+    }
+
     const itemId = getItemId(book);
     const activityRef = doc(db, 'users', user.uid, 'activities', itemId);
     
@@ -231,6 +417,9 @@ export default function DiscoverPage() {
       const activityWithId: Activity = { ...newActivity, id: itemId };
       setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === itemId && a.type === 'book'))]);
       
+      // Track content session
+      await trackContentSession('book');
+      
     } catch (error) {
       console.error('Failed to mark book as read:', error);
       alert('Failed to track reading activity. Please try again.');
@@ -240,6 +429,12 @@ export default function DiscoverPage() {
   const markAsWatched = async (video: Video) => {
     if (!user) return alert('Please log in to track your viewing activity.');
     
+    // Check screen time restrictions for videos
+    if (video && !canAccessContent('video')) {
+      alert(getScreenTimeMessage() || 'Content access is restricted.');
+      return;
+    }
+
     const itemId = video.videoId;
     const activityRef = doc(db, 'users', user.uid, 'activities', itemId);
     
@@ -260,6 +455,9 @@ export default function DiscoverPage() {
       // Update local state
       const activityWithId: Activity = { ...newActivity, id: itemId };
       setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === itemId && a.type === 'video'))]);
+      
+      // Track content session (assume 5 minutes for a video view)
+      await updateUsage(user.uid, 'video', 5);
       
     } catch (error) {
       console.error('Failed to mark video as watched:', error);
@@ -298,7 +496,7 @@ export default function DiscoverPage() {
     }
   };
 
-  // Collection API calls
+  // Collection API calls (keeping existing ones)
   const fetchCollectionItems = async (category: 'books' | 'videos') => {
     setLoading(true);
     setCollectionMessage(null);
@@ -307,12 +505,11 @@ export default function DiscoverPage() {
       const res = await fetch(`/api/github/list-files?category=${category}`);
       const files: { name: string; path: string }[] = await res.json();
 
-      // Fetch file content for each
       const contentPromises = files.map(async (file) => {
         const r = await fetch(`/api/github/get-file?path=${encodeURIComponent(file.path)}`);
         const data = await r.json();
         return {
-          id: data.id || file.name, // fallback to filename if id missing
+          id: data.id || file.name,
           title: data.title || "No Title",
           authors: data.authors || [],
           categories: data.categories || [],
@@ -336,7 +533,6 @@ export default function DiscoverPage() {
     }
   };
 
-  // Filter collection items based on search query
   const filterCollectionItems = () => {
     if (!searchQuery.trim()) {
       setFilteredCollectionItems(collectionItems);
@@ -353,7 +549,7 @@ export default function DiscoverPage() {
     setFilteredCollectionItems(filtered);
   };
 
-  // API calls
+  // API calls (keeping existing ones)
   const searchBooks = async () => {
     setLoading(true);
     try {
@@ -401,6 +597,7 @@ export default function DiscoverPage() {
     }
   };
 
+  // NEW: Updated useEffect to load screen time data
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
@@ -410,6 +607,18 @@ export default function DiscoverPage() {
           if (snap.exists()) {
             const data = snap.data();
             setRole(data.role || "");
+            
+            // Load screen time settings and usage for children and students
+            if (data.role === "child" || data.role === "student") {
+              const settings = await loadScreenTimeSettings(u.uid);
+              const usage = await loadTodayUsage(u.uid);
+              
+              if (settings && usage) {
+                const status = calculateScreenTimeStatus(settings, usage);
+                setScreenTimeStatus(status);
+                setScreenTimeMessage(getScreenTimeMessage());
+              }
+            }
           } else {
             setRole("");
           }
@@ -423,12 +632,25 @@ export default function DiscoverPage() {
         setRole("");
         setFavourites([]);
         setActivities([]);
+        setScreenTimeSettings(null);
+        setCurrentUsage(null);
+        setScreenTimeStatus('within-limits');
+        setScreenTimeMessage(null);
       }
     });
     return () => unsub();
   }, []);
 
-  // Favourites & Reviews & Reports
+  // NEW: Update screen time status when settings or usage change
+  useEffect(() => {
+    if (screenTimeSettings && currentUsage) {
+      const status = calculateScreenTimeStatus(screenTimeSettings, currentUsage);
+      setScreenTimeStatus(status);
+      setScreenTimeMessage(getScreenTimeMessage());
+    }
+  }, [screenTimeSettings, currentUsage]);
+
+  // Favourites & Reviews & Reports (keeping existing functions)
   async function loadFavourites(uid: string) {
     const snap = await getDocs(collection(db, 'users', uid, 'favourites'));
     const favs: any[] = [];
@@ -442,6 +664,13 @@ export default function DiscoverPage() {
 
   async function toggleFavourite(item: Book | Video | ContentItem, type: 'book' | 'video') {
     if (!user) return alert('Please log in to favourite items.');
+    
+    // Check screen time restrictions
+    if (!canAccessContent(type)) {
+      alert(getScreenTimeMessage() || 'Content access is restricted.');
+      return;
+    }
+
     const key = getItemId(item);
     const exists = favourites.find((f) => f.id === key && f.type === type);
     const ref = doc(db, 'users', user.uid, 'favourites', key);
@@ -463,8 +692,15 @@ export default function DiscoverPage() {
 
   async function submitReview() {
     if (!user || !selectedItem) return;
-    const key = getItemId(selectedItem);
+    
+    // Check screen time restrictions
     const itemType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
+    if (!canAccessContent(itemType)) {
+      alert(getScreenTimeMessage() || 'Content access is restricted.');
+      return;
+    }
+
+    const key = getItemId(selectedItem);
     await addDoc(collection(db, 'books-video-reviews'), {
       userId: user.uid,
       userName: user.displayName || 'Anonymous',
@@ -519,6 +755,7 @@ export default function DiscoverPage() {
     alert('Content reported. Admin will review it.');
   }
 
+  // Keep existing useEffect hooks for search functionality
   useEffect(() => {
     if (mode === 'books') {
       searchBooks();
@@ -531,26 +768,23 @@ export default function DiscoverPage() {
     }
   }, [mode, booksPage, videosPage, bucket, videoBucket]);
 
-  // Filter collection items when search query changes for collection modes
   useEffect(() => {
     if (mode === 'collection-books' || mode === 'collection-videos') {
       filterCollectionItems();
     }
   }, [searchQuery, collectionItems, mode]);
 
-  // Initial search
   useEffect(() => {
     searchBooks();
   }, []);
 
-  // Load reviews when a modal opens
   useEffect(() => {
     if (selectedItem) {
       loadReviewsForItem(getItemId(selectedItem));
     }
   }, [selectedItem]);
 
-  // Event handlers
+  // Event handlers (keeping existing ones)
   const handleSearch = () => {
     setBooksPage(1);
     setVideosPage(1);
@@ -564,6 +798,12 @@ export default function DiscoverPage() {
   };
 
   const handleModeChange = (newMode: 'books' | 'videos' | 'collection-books' | 'collection-videos') => {
+    // Check screen time restrictions for video mode
+    if ((newMode === 'videos' || newMode === 'collection-videos') && !canAccessContent('video')) {
+      alert(getScreenTimeMessage() || 'Video content is restricted.');
+      return;
+    }
+
     setMode(newMode);
     setSearchQuery(''); // Clear search when switching modes
     if (newMode === 'books') {
@@ -587,6 +827,21 @@ export default function DiscoverPage() {
   const handleVideoBucketChange = (newBucket: keyof typeof videoBucketDisplayNames) => {
     setVideoBucket(newBucket);
     setVideosPage(1);
+  };
+
+  // NEW: Handle content item click with screen time check
+  const handleContentItemClick = (item: Book | Video | ContentItem) => {
+    const contentType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
+    
+    if (!canAccessContent(contentType)) {
+      alert(getScreenTimeMessage() || 'Content access is restricted.');
+      return;
+    }
+
+    setSelectedItem(item);
+    
+    // Start session tracking when opening content
+    setSessionStartTime(new Date());
   };
 
   // Pagination components
@@ -718,6 +973,52 @@ export default function DiscoverPage() {
   return (
     <main className="bg-white">
       <div className="max-w-6xl mx-auto p-6 font-sans text-gray-900">
+        {/* NEW: Screen Time Status Banner */}
+        {screenTimeSettings?.enabled && screenTimeStatus !== 'within-limits' && (
+          <div className={`mb-4 p-4 rounded-xl border flex items-center gap-3 ${
+            screenTimeStatus === 'bedtime' 
+              ? 'bg-purple-50 border-purple-200'
+              : screenTimeStatus === 'limit-exceeded'
+              ? 'bg-red-50 border-red-200'
+              : 'bg-yellow-50 border-yellow-200'
+          }`}>
+            {screenTimeStatus === 'bedtime' && <Clock className="w-5 h-5 text-purple-600" />}
+            {screenTimeStatus === 'limit-exceeded' && <Shield className="w-5 h-5 text-red-600" />}
+            {screenTimeStatus === 'approaching-limit' && <AlertCircle className="w-5 h-5 text-yellow-600" />}
+            
+            <div className="flex-1">
+              <h3 className="font-medium">
+                {screenTimeStatus === 'bedtime' && 'Bedtime Hours'}
+                {screenTimeStatus === 'limit-exceeded' && 'Screen Time Limit Reached'}
+                {screenTimeStatus === 'approaching-limit' && 'Approaching Screen Time Limit'}
+              </h3>
+              <p className="text-sm opacity-75">{screenTimeMessage}</p>
+            </div>
+
+            {currentUsage && screenTimeSettings && (
+              <div className="text-right">
+                <div className="text-sm">
+                  <div>Today: {formatMinutes(currentUsage.totalMinutes)}</div>
+                  <div className="text-xs opacity-75">
+                    Videos: {formatMinutes(currentUsage.videoMinutes)} / {formatMinutes(screenTimeSettings.videoLimit)}
+                  </div>
+                </div>
+                <div className="w-20 bg-gray-200 rounded-full h-2 mt-1">
+                  <div 
+                    className={`h-2 rounded-full transition-all ${
+                      screenTimeStatus === 'limit-exceeded' ? 'bg-red-500' :
+                      screenTimeStatus === 'approaching-limit' ? 'bg-yellow-500' : 'bg-green-500'
+                    }`}
+                    style={{ 
+                      width: `${Math.min(100, (currentUsage.totalMinutes / screenTimeSettings.dailyLimit) * 100)}%` 
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-2xl font-bold">Discover Books & Videos for Kids</h1>
           
@@ -819,7 +1120,10 @@ export default function DiscoverPage() {
           </button>
           <button
             onClick={() => handleModeChange('videos')}
-            className={`px-4 py-2 rounded-lg ${mode === 'videos' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+            className={`px-4 py-2 rounded-lg ${mode === 'videos' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} ${
+              !canAccessContent('video') ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+            disabled={!canAccessContent('video')}
           >
             Videos
           </button>
@@ -831,7 +1135,10 @@ export default function DiscoverPage() {
           </button>
           <button
             onClick={() => handleModeChange('collection-videos')}
-            className={`px-4 py-2 rounded-lg ${mode === 'collection-videos' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+            className={`px-4 py-2 rounded-lg ${mode === 'collection-videos' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} ${
+              !canAccessContent('video') ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+            disabled={!canAccessContent('video')}
           >
             Our Video Collection
           </button>
@@ -891,7 +1198,7 @@ export default function DiscoverPage() {
                   <div
                     key={book.id}
                     className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md relative"
-                    onClick={() => setSelectedItem(book)}
+                    onClick={() => handleContentItemClick(book)}
                   >
                     {/* Activity indicator */}
                     {hasActivity(book.id, 'book') && (
@@ -948,7 +1255,7 @@ export default function DiscoverPage() {
                   <div
                     key={`${video.videoId}-${index}`}
                     className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md relative"
-                    onClick={() => setSelectedItem(video)}
+                    onClick={() => handleContentItemClick(video)}
                   >
                     {/* Activity indicator */}
                     {hasActivity(video.videoId, 'video') && (
@@ -993,7 +1300,7 @@ export default function DiscoverPage() {
                   <div
                     key={`${contentItem.id}-${index}`}
                     className="border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md relative"
-                    onClick={() => setSelectedItem(contentItem)}
+                    onClick={() => handleContentItemClick(contentItem)}
                   >
                     {/* Activity indicator for collection books */}
                     {mode === 'collection-books' && hasActivity(contentItem.id, 'book') && (
@@ -1074,7 +1381,14 @@ export default function DiscoverPage() {
         <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-50 text-gray-800 overflow-auto p-4">
           <div className="bg-white p-6 rounded-xl w-full max-w-[720px] relative max-h-[90vh] overflow-y-auto">
             {/* Close button */}
-            <button onClick={() => setSelectedItem(null)} className="sticky top-0 float-right text-xl font-bold bg-white">
+            <button 
+              onClick={() => {
+                // Track session time when closing modal
+                trackContentSession((mode === 'books' || mode === 'collection-books') ? 'book' : 'video');
+                setSelectedItem(null);
+              }} 
+              className="sticky top-0 float-right text-xl font-bold bg-white"
+            >
               ×
             </button>
 
@@ -1121,11 +1435,27 @@ export default function DiscoverPage() {
                     : 'No description available.'}
                 </p>
 
+                {/* NEW: Screen time warning for books */}
+                {screenTimeSettings?.enabled && screenTimeStatus !== 'within-limits' && (
+                  <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <p className="text-sm text-yellow-800">
+                      {screenTimeMessage}
+                    </p>
+                  </div>
+                )}
+
                 {/* Read sample toggle - for external books */}
-                {isBook(selectedItem) && selectedItem.id && (
+                {isBook(selectedItem) && selectedItem.id && canAccessContent('book') && (
                   <div className="mb-4">
                     <button
-                      onClick={() => setShowPreview(s => !s)}
+                      onClick={() => {
+                        setShowPreview(s => !s);
+                        if (!showPreview) {
+                          setSessionStartTime(new Date());
+                        } else {
+                          trackContentSession('book');
+                        }
+                      }}
                       className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50"
                     >
                       {showPreview ? 'Hide preview' : 'Read sample'}
@@ -1136,7 +1466,6 @@ export default function DiscoverPage() {
 
                     {showPreview && (
                       <div className="mt-3 rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-gray-50">
-                        {/* Portrait-ish aspect for books */}
                         <div className="relative pt-[133.33%] sm:pt-[100%]">
                           <iframe
                             src={`https://books.google.com/books?id=${encodeURIComponent(selectedItem.id)}&printsec=frontcover&output=embed`}
@@ -1154,10 +1483,17 @@ export default function DiscoverPage() {
                 )}
 
                 {/* Read sample toggle - for collection books */}
-                {isContentItem(selectedItem) && mode === 'collection-books' && selectedItem.link && selectedItem.link !== '#' && (
+                {isContentItem(selectedItem) && mode === 'collection-books' && selectedItem.link && selectedItem.link !== '#' && canAccessContent('book') && (
                   <div className="mb-4">
                     <button
-                      onClick={() => setShowPreview(s => !s)}
+                      onClick={() => {
+                        setShowPreview(s => !s);
+                        if (!showPreview) {
+                          setSessionStartTime(new Date());
+                        } else {
+                          trackContentSession('book');
+                        }
+                      }}
                       className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50"
                     >
                       {showPreview ? 'Hide preview' : 'Read sample'}
@@ -1168,7 +1504,6 @@ export default function DiscoverPage() {
 
                     {showPreview && (
                       <div className="mt-3 rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-gray-50">
-                        {/* Portrait-ish aspect for books */}
                         <div className="relative pt-[133.33%] sm:pt-[100%]">
                           <iframe
                             src={selectedItem.link}
@@ -1187,11 +1522,16 @@ export default function DiscoverPage() {
                 )}
 
                 {/* External link for books */}
-                {isBook(selectedItem) && bestBookUrl(selectedItem) && (
+                {isBook(selectedItem) && bestBookUrl(selectedItem) && canAccessContent('book') && (
                   <a
                     href={bestBookUrl(selectedItem)!}
                     target="_blank"
                     rel="noopener"
+                    onClick={() => {
+                      if (user && screenTimeSettings?.enabled) {
+                        updateUsage(user.uid, 'book', 5);
+                      }
+                    }}
                     className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 mb-3"
                   >
                     View on Google Books
@@ -1203,11 +1543,16 @@ export default function DiscoverPage() {
                 )}
 
                 {/* External link for collection items */}
-                {isContentItem(selectedItem) && selectedItem.link && selectedItem.link !== '#' && (
+                {isContentItem(selectedItem) && selectedItem.link && selectedItem.link !== '#' && canAccessContent('book') && (
                   <a
                     href={selectedItem.link}
                     target="_blank"
                     rel="noopener"
+                    onClick={() => {
+                      if (user && screenTimeSettings?.enabled) {
+                        updateUsage(user.uid, 'book', 5);
+                      }
+                    }}
                     className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 mb-3"
                   >
                     View External Link
@@ -1222,21 +1567,52 @@ export default function DiscoverPage() {
 
             {isVideo(selectedItem) && (
               <>
-                {/* Player */}
-                <div className="rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-black mb-3">
-                  <div className="relative pt-[56.25%]">
-                    <iframe
-                      src={`https://www.youtube-nocookie.com/embed/${selectedItem.videoId}?rel=0&modestbranding=1`}
-                      title={selectedItem.title}
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                      allowFullScreen
-                      loading="lazy"
-                      className="absolute inset-0 w-full h-full"
-                    />
+                {screenTimeSettings?.enabled && (screenTimeStatus === 'bedtime' || screenTimeStatus === 'limit-exceeded' || !canAccessContent('video')) ? (
+                  <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-center">
+                    <Shield className="w-8 h-8 mx-auto mb-2 text-red-600" />
+                    <h3 className="font-medium text-red-800 mb-2">Video Access Restricted</h3>
+                    <p className="text-sm text-red-700">
+                      {screenTimeMessage}
+                    </p>
                   </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-black mb-3">
+                      <div className="relative pt-[56.25%]">
+                        <iframe
+                          src={`https://www.youtube-nocookie.com/embed/${selectedItem.videoId}?rel=0&modestbranding=1`}
+                          title={selectedItem.title}
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                          allowFullScreen
+                          loading="lazy"
+                          className="absolute inset-0 w-full h-full"
+                          onLoad={() => {
+                            setSessionStartTime(new Date());
+                          }}
+                        />
+                      </div>
+                    </div>
 
-                {/* Meta row */}
+                    {screenTimeSettings?.enabled && currentUsage && (
+                      <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-blue-800">
+                            Video time today: {formatMinutes(currentUsage.videoMinutes)} / {formatMinutes(screenTimeSettings.videoLimit)}
+                          </span>
+                          <div className="w-20 bg-blue-200 rounded-full h-2">
+                            <div 
+                              className="h-2 bg-blue-600 rounded-full transition-all"
+                              style={{ 
+                                width: `${Math.min(100, (currentUsage.videoMinutes / screenTimeSettings.videoLimit) * 100)}%` 
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
                 <div className="flex flex-wrap items-center justify-between gap-2 text-sm mb-2">
                   <div className="text-gray-700">
                     {selectedItem.channel && (
@@ -1246,7 +1622,6 @@ export default function DiscoverPage() {
                       <span className="ml-2 text-gray-500">• {fmtDate(selectedItem.publishedAt)}</span>
                     )}
                     
-                    {/* Activity status in modal */}
                     {hasActivity(selectedItem.videoId, 'video') && (
                       <div className="ml-2 inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
                         <Check className="w-3 h-3" />
@@ -1265,11 +1640,16 @@ export default function DiscoverPage() {
                   </p>
                 )}
 
-                {["admin", "user"].includes(role?.toLowerCase()) && (
+                {["admin", "user"].includes(role?.toLowerCase()) && canAccessContent('video') && (
                   <a
                     href={selectedItem.url || `https://www.youtube.com/watch?v=${selectedItem.videoId}`}
                     target="_blank"
                     rel="noopener"
+                    onClick={() => {
+                      if (user && screenTimeSettings?.enabled) {
+                        updateUsage(user.uid, 'video', 10);
+                      }
+                    }}
                     className="text-blue-600 hover:text-blue-800 text-sm mb-3 block"
                   >
                     Watch on YouTube
@@ -1280,11 +1660,9 @@ export default function DiscoverPage() {
               </>
             )}
 
-            {/* Actions */}
             <div className="flex flex-col gap-2 mb-3">
               {user && (
                 <>
-                  {/* Activity tracking buttons */}
                   {isBook(selectedItem) && (
                     <button
                       onClick={() => hasActivity(selectedItem.id, 'book') 
@@ -1295,7 +1673,8 @@ export default function DiscoverPage() {
                         hasActivity(selectedItem.id, 'book')
                           ? 'bg-green-100 text-green-700 border-green-300'
                           : 'border-gray-300 hover:bg-green-50'
-                      }`}
+                      } ${!canAccessContent('book') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      disabled={!canAccessContent('book')}
                     >
                       <BookOpen className="w-4 h-4" />
                       {hasActivity(selectedItem.id, 'book') ? 'Mark as Unread' : 'Mark as Read'}
@@ -1312,7 +1691,8 @@ export default function DiscoverPage() {
                         hasActivity(selectedItem.id, 'book')
                           ? 'bg-green-100 text-green-700 border-green-300'
                           : 'border-gray-300 hover:bg-green-50'
-                      }`}
+                      } ${!canAccessContent('book') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      disabled={!canAccessContent('book')}
                     >
                       <BookOpen className="w-4 h-4" />
                       {hasActivity(selectedItem.id, 'book') ? 'Mark as Unread' : 'Mark as Read'}
@@ -1329,7 +1709,8 @@ export default function DiscoverPage() {
                         hasActivity(selectedItem.videoId, 'video')
                           ? 'bg-green-100 text-green-700 border-green-300'
                           : 'border-gray-300 hover:bg-green-50'
-                      }`}
+                      } ${!canAccessContent('video') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      disabled={!canAccessContent('video')}
                     >
                       <Play className="w-4 h-4" />
                       {hasActivity(selectedItem.videoId, 'video') ? 'Mark as Unwatched' : 'Mark as Watched'}
@@ -1338,13 +1719,18 @@ export default function DiscoverPage() {
                   
                   <button
                     onClick={() => toggleFavourite(selectedItem, (mode === 'books' || mode === 'collection-books') ? 'book' : 'video')}
-                    className="px-3 py-1 rounded-lg border"
+                    className={`px-3 py-1 rounded-lg border ${!canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    disabled={!canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video')}
                   >
                     {isFavourite(getItemId(selectedItem), (mode === 'books' || mode === 'collection-books') ? 'book' : 'video')
                       ? '★ Remove Favourite'
                       : '☆ Add Favourite'}
                   </button>
-                  <button onClick={handleLeaveReview} className="px-3 py-1 rounded-lg border text-green-600">
+                  <button 
+                    onClick={handleLeaveReview} 
+                    className={`px-3 py-1 rounded-lg border text-green-600 ${!canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    disabled={!canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video')}
+                  >
                     Leave Review
                   </button>
                   <button
@@ -1357,7 +1743,6 @@ export default function DiscoverPage() {
               )}
             </div>
 
-            {/* Reviews */}
             <div className="mt-3">
               <h3 className="font-semibold mb-1">Reviews</h3>
 
@@ -1379,7 +1764,7 @@ export default function DiscoverPage() {
                 <p className="text-sm text-gray-500">No reviews yet.</p>
               )}
 
-              {user ? (
+              {user && canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') ? (
                 <div className="mt-2">
                   <textarea
                     ref={reviewRef}
@@ -1395,9 +1780,13 @@ export default function DiscoverPage() {
                     Submit
                   </button>
                 </div>
-              ) : (
+              ) : !user ? (
                 <p className="text-xs text-gray-500 mt-2">
                   <Link href="/login" className="text-gray-700 hover:text-pink-500">Login</Link> to leave a review.
+                </p>
+              ) : (
+                <p className="text-xs text-gray-500 mt-2">
+                  Content access restricted - cannot leave review.
                 </p>
               )}
             </div>
@@ -1405,9 +1794,8 @@ export default function DiscoverPage() {
         </div>
       )}
 
-      {["admin", "user"].includes(role?.toLowerCase()) && (
+      {["admin", "parent", "child", "educator", "student"].includes(role?.toLowerCase()) && (
         <>
-          {/* <Chatbot /> */}
           <DialogflowMessenger />
         </>
       )}
