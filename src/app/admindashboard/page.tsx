@@ -1,5 +1,6 @@
 'use client';
 
+import AnalyticsDashboard from "../AnalyticsDashboard/AnalyticsDashboard";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { useEffect, useState } from "react";
@@ -631,7 +632,15 @@ useEffect(() => {
 {activeTab === "analytics" && (
   <section>
     <h2 className="text-2xl font-bold text-pink-600 mb-6">Analytics Dashboard</h2>
-
+      <AnalyticsDashboard 
+    users={users}
+    reviews={reviews}
+    contacts={contacts}
+    plans={plans}
+    reports={reports}
+    reportedContent={reportedContent}
+    subscriptions={subscriptions}
+  />
   </section>
 )}
 
