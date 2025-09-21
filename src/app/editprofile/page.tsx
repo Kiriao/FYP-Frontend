@@ -325,14 +325,18 @@ if (data.role === "parent" || data.role === "educator") {
         <div className="w-48 border-r pr-4">
           <button className={`block w-full text-left py-2 px-3 rounded-md mb-2 font-semibold ${activeTab === "profile" ? "bg-pink-100 text-pink-600" : "text-gray-600"}`} onClick={() => setActiveTab("profile")}>Profile</button>
           <button className={`block w-full text-left py-2 px-3 rounded-md mb-2 font-semibold ${activeTab === "security" ? "bg-pink-100 text-pink-600" : "text-gray-600"}`} onClick={() => setActiveTab("security")}>Security</button>
-          <button
-            className={`block w-full text-left py-2 px-3 rounded-md font-semibold ${
-              activeTab === "child" ? "bg-pink-100 text-pink-600" : "text-gray-600"
-            }`}
-            onClick={() => setActiveTab("child")}
-          >
-            {role === "educator" ? "Manage Students" : "Manage Child"}
-          </button>
+
+          {/* Only show Manage Child if NOT admin */}
+          {role && role.toLowerCase() !== "admin" && (
+            <button
+              className={`block w-full text-left py-2 px-3 rounded-md font-semibold ${
+                activeTab === "child" ? "bg-pink-100 text-pink-600" : "text-gray-600"
+              }`}
+              onClick={() => setActiveTab("child")}
+            >
+              Manage Child
+            </button>
+          )}
 
         </div>
 
