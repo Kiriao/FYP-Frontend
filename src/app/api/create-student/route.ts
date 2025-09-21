@@ -59,6 +59,7 @@ export async function POST(req: NextRequest) {
     await db.collection("users").doc(userRecord.uid).set({
       fullName: studentName,
       email: studentEmail,
+      plan: "Free Plans",
       role: "student",
       educatorId,
       restrictions: [],

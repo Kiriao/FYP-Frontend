@@ -60,7 +60,7 @@ export default function RegisterPage() {
         role, // 👈 Save selected role
         createdAt: new Date(),
         emailVerified: user.emailVerified,
-        plan: "Free Plan",
+        plan: "Free Plans",
       });
 
       alert(
