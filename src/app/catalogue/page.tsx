@@ -717,11 +717,11 @@ export default function DiscoverPage() {
   return (
     <main className="bg-white">
       <div className="max-w-6xl mx-auto p-6 font-sans text-gray-900">
-        <div className="flex items-center justify-between mb-3">
-          <h1 className="text-2xl font-bold">Discover Books & Videos for Kids</h1>
+{/*         <div className="flex items-center justify-between mb-3">
+          <h1 className="text-2xl font-bold">Discover Books & Videos for Kids</h1> */}
           
           {/* Activity Panel Toggle */}
-          {user && (
+{/*           {user && (
             <button
               onClick={() => setShowActivityPanel(!showActivityPanel)}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
@@ -730,7 +730,7 @@ export default function DiscoverPage() {
               My Activity ({activities.length})
             </button>
           )}
-        </div>
+        </div> */}
 
         {/* Activity Panel */}
         {showActivityPanel && user && (
@@ -1404,7 +1404,7 @@ export default function DiscoverPage() {
         </div>
       )}
 
-      {["admin", "user"].includes(role?.toLowerCase()) && (
+      {["admin", "parent", "child", "educator", "student"].includes(role?.toLowerCase()) && (
         <>
           {/* <Chatbot /> */}
           <DialogflowMessenger />
