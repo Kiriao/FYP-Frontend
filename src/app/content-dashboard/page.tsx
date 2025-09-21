@@ -12,6 +12,19 @@ interface FileItem {
   title?: string;
 }
 
+interface ScheduledItem {
+  id: string;
+  title: string;
+  authors: string[];
+  categories: string[];
+  synopsis: string;
+  thumbnail: string;
+  link: string;
+  category: CategoryType;
+  scheduledDate: string;
+  status: "pending" | "published" | "failed";
+}
+
 /* ------------------ DISCOVERY CATEGORIES ------------------ */
 const DISCOVERY_CATEGORIES = [
   "Juvenile Fiction",
@@ -23,7 +36,7 @@ const DISCOVERY_CATEGORIES = [
 
 /* ------------------ MAIN PAGE ------------------ */
 export default function ContentManagerPage() {
-  const [activeTab, setActiveTab] = useState<"publish" | "update" | "remove">(
+  const [activeTab, setActiveTab] = useState<"publish" | "update" | "remove" | "schedule">(
     "publish"
   );
 
@@ -35,7 +48,7 @@ export default function ContentManagerPage() {
           Content Manager
         </h2>
         <nav className="flex flex-col gap-2">
-          {(["publish", "update", "remove"] as const).map((tab) => (
+          {(["publish", "update", "remove", "schedule"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -56,6 +69,7 @@ export default function ContentManagerPage() {
         {activeTab === "publish" && <PublishForm />}
         {activeTab === "update" && <UpdateForm />}
         {activeTab === "remove" && <RemoveForm />}
+        {activeTab === "schedule" && <ScheduleForm />}
       </main>
     </section>
   );
@@ -132,73 +146,459 @@ function PublishForm() {
   };
 
   return (
-        <section className="bg-white py-16 px-6 max-w-3xl mx-auto rounded-xl shadow-md border space-y-6">
+    <section className="bg-white py-16 px-6 max-w-3xl mx-auto rounded-xl shadow-md border space-y-6">
       <h2 className="text-2xl font-bold text-pink-600 mb-4 text-center">
         Publish Content
       </h2>
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        handlePublish();
-      }}
-      className="bg-white p-6 rounded-xl shadow-md border border-gray-200 space-y-4 max-w-3xl mx-auto text-gray-800"
-    >
-      <CategoryToggle category={category} setCategory={setCategory} />
-
-      <input
-        type="text"
-        placeholder="Title"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        className="w-full px-4 py-2 border rounded-md text-gray-800"
-        required
-      />
-      <input
-        type="text"
-        placeholder="Authors (comma separated)"
-        value={authors}
-        onChange={(e) => setAuthors(e.target.value)}
-        className="w-full px-4 py-2 border rounded-md text-gray-800"
-        required
-      />
-
-      <CheckboxGroup selected={selectedCategories} toggle={handleCategoryToggle} />
-
-      <textarea
-        placeholder="Synopsis"
-        value={synopsis}
-        onChange={(e) => setSynopsis(e.target.value)}
-        className="w-full px-4 py-2 border rounded-md text-gray-800"
-      />
-      <input
-        type="text"
-        placeholder="Thumbnail URL"
-        value={thumbnail}
-        onChange={(e) => setThumbnail(e.target.value)}
-        className="w-full px-4 py-2 border rounded-md"
-      />
-      <input
-        type="url"
-        placeholder="Book / Video Link"
-        value={link}
-        onChange={(e) => setLink(e.target.value)}
-        className="w-full px-4 py-2 border rounded-md"
-      />
-
-      <button
-        type="submit"
-        disabled={loading}
-        className={`w-full py-2 rounded-md font-semibold transition ${
-          loading
-            ? "bg-gray-400 text-white cursor-not-allowed"
-            : "bg-pink-600 text-white hover:bg-pink-700"
-        }`}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          handlePublish();
+        }}
+        className="bg-white p-6 rounded-xl shadow-md border border-gray-200 space-y-4 max-w-3xl mx-auto text-gray-800"
       >
-        {loading ? "Publishing..." : "Publish"}
-      </button>
+        <CategoryToggle category={category} setCategory={setCategory} />
 
-      {message && <ResponseMessage message={message} />}
-    </form>
+        <input
+          type="text"
+          placeholder="Title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="w-full px-4 py-2 border rounded-md text-gray-800"
+          required
+        />
+        <input
+          type="text"
+          placeholder="Authors (comma separated)"
+          value={authors}
+          onChange={(e) => setAuthors(e.target.value)}
+          className="w-full px-4 py-2 border rounded-md text-gray-800"
+          required
+        />
+
+        <CheckboxGroup selected={selectedCategories} toggle={handleCategoryToggle} />
+
+        <textarea
+          placeholder="Synopsis"
+          value={synopsis}
+          onChange={(e) => setSynopsis(e.target.value)}
+          className="w-full px-4 py-2 border rounded-md text-gray-800"
+        />
+        <input
+          type="text"
+          placeholder="Thumbnail URL"
+          value={thumbnail}
+          onChange={(e) => setThumbnail(e.target.value)}
+          className="w-full px-4 py-2 border rounded-md"
+        />
+        <input
+          type="url"
+          placeholder="Book / Video Link"
+          value={link}
+          onChange={(e) => setLink(e.target.value)}
+          className="w-full px-4 py-2 border rounded-md"
+        />
+
+        <button
+          type="submit"
+          disabled={loading}
+          className={`w-full py-2 rounded-md font-semibold transition ${
+            loading
+              ? "bg-gray-400 text-white cursor-not-allowed"
+              : "bg-pink-600 text-white hover:bg-pink-700"
+          }`}
+        >
+          {loading ? "Publishing..." : "Publish"}
+        </button>
+
+        {message && <ResponseMessage message={message} />}
+      </form>
+    </section>
+  );
+}
+
+/* ------------------ SCHEDULE FORM ------------------ */
+function ScheduleForm() {
+  const [category, setCategory] = useState<CategoryType>("books");
+  const [title, setTitle] = useState("");
+  const [authors, setAuthors] = useState("");
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [synopsis, setSynopsis] = useState("");
+  const [thumbnail, setThumbnail] = useState("");
+  const [link, setLink] = useState("");
+  const [scheduledDate, setScheduledDate] = useState("");
+  const [scheduledTime, setScheduledTime] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [scheduledItems, setScheduledItems] = useState<ScheduledItem[]>([]);
+  const [showScheduled, setShowScheduled] = useState(false);
+
+  // Load scheduled items on component mount
+  useEffect(() => {
+    loadScheduledItems();
+  }, []);
+
+  const loadScheduledItems = () => {
+    // Using in-memory storage instead of localStorage
+    setScheduledItems([]);
+  };
+
+  const saveScheduledItems = (items: ScheduledItem[]) => {
+    setScheduledItems(items);
+  };
+
+  const generateId = () => title.trim().replace(/\s+/g, "-");
+
+  const handleCategoryToggle = (cat: string) => {
+    setSelectedCategories((prev) =>
+      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
+    );
+  };
+
+  const getCurrentDateTime = () => {
+    const now = new Date();
+    const date = now.toISOString().split('T')[0];
+    const time = now.toTimeString().split(' ')[0].substring(0, 5);
+    return { date, time };
+  };
+
+  const handleSchedule = async () => {
+    if (!scheduledDate || !scheduledTime) {
+      setMessage("❌ Please select both date and time");
+      return;
+    }
+
+    const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
+    const now = new Date();
+
+    if (scheduledDateTime <= now) {
+      setMessage("❌ Scheduled time must be in the future");
+      return;
+    }
+
+    setLoading(true);
+    setMessage(null);
+
+    const id = generateId();
+    const scheduledItem: ScheduledItem = {
+      id,
+      title,
+      authors: authors.split(",").map((a) => a.trim()),
+      categories: selectedCategories,
+      synopsis,
+      thumbnail,
+      link,
+      category,
+      scheduledDate: scheduledDateTime.toISOString(),
+      status: "pending"
+    };
+
+    try {
+      // Save to scheduled items
+      const newScheduledItems = [...scheduledItems, scheduledItem];
+      saveScheduledItems(newScheduledItems);
+
+      setMessage(`✅ Scheduled "${title}" for ${scheduledDate} at ${scheduledTime}`);
+      
+      // Clear form
+      setTitle("");
+      setAuthors("");
+      setSelectedCategories([]);
+      setSynopsis("");
+      setThumbnail("");
+      setLink("");
+      setScheduledDate("");
+      setScheduledTime("");
+
+    } catch (err: any) {
+      setMessage("❌ Error: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePublishNow = async (item: ScheduledItem) => {
+    setMessage(null);
+    
+    const filename = `${item.id}.json`;
+    const content = {
+      id: item.id,
+      title: item.title,
+      authors: item.authors,
+      categories: item.categories,
+      synopsis: item.synopsis,
+      thumbnail: item.thumbnail,
+      link: item.link,
+    };
+
+    try {
+      const res = await fetch("/api/github/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category: item.category, filename, content }),
+      });
+
+      if (res.ok) {
+        // Update item status
+        const updatedItems = scheduledItems.map(si => 
+          si.id === item.id ? { ...si, status: "published" as const } : si
+        );
+        saveScheduledItems(updatedItems);
+        setMessage(`✅ Published "${item.title}" successfully`);
+      } else {
+        const data = await res.json();
+        const updatedItems = scheduledItems.map(si => 
+          si.id === item.id ? { ...si, status: "failed" as const } : si
+        );
+        saveScheduledItems(updatedItems);
+        setMessage(`❌ Publish failed: ${data.error}`);
+      }
+    } catch (err: any) {
+      setMessage("❌ Error: " + err.message);
+    }
+  };
+
+  const handleDeleteScheduled = (itemId: string) => {
+    const updatedItems = scheduledItems.filter(item => item.id !== itemId);
+    saveScheduledItems(updatedItems);
+  };
+
+  const checkAndPublishScheduled = () => {
+    const now = new Date();
+    scheduledItems.forEach(item => {
+      if (item.status === "pending" && new Date(item.scheduledDate) <= now) {
+        handlePublishNow(item);
+      }
+    });
+  };
+
+  // Check for items to publish every minute
+  useEffect(() => {
+    const interval = setInterval(checkAndPublishScheduled, 60000);
+    return () => clearInterval(interval);
+  }, [scheduledItems]);
+
+  const pendingItems = scheduledItems.filter(item => item.status === "pending");
+  const publishedItems = scheduledItems.filter(item => item.status === "published");
+  const failedItems = scheduledItems.filter(item => item.status === "failed");
+
+  return (
+    <section className="bg-white py-16 px-6 max-w-4xl mx-auto rounded-xl shadow-md border space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-pink-600">
+          Schedule Content
+        </h2>
+        <button
+          onClick={() => setShowScheduled(!showScheduled)}
+          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+        >
+          {showScheduled ? "Hide" : "Show"} Scheduled ({scheduledItems.length})
+        </button>
+      </div>
+
+      {!showScheduled ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSchedule();
+          }}
+          className="space-y-4"
+        >
+          <CategoryToggle category={category} setCategory={setCategory} />
+
+          <input
+            type="text"
+            placeholder="Title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="w-full px-4 py-2 border rounded-md text-gray-800"
+            required
+          />
+          <input
+            type="text"
+            placeholder="Authors (comma separated)"
+            value={authors}
+            onChange={(e) => setAuthors(e.target.value)}
+            className="w-full px-4 py-2 border rounded-md text-gray-800"
+            required
+          />
+
+          <CheckboxGroup selected={selectedCategories} toggle={handleCategoryToggle} />
+
+          <textarea
+            placeholder="Synopsis"
+            value={synopsis}
+            onChange={(e) => setSynopsis(e.target.value)}
+            className="w-full px-4 py-2 border rounded-md text-gray-800"
+            rows={3}
+          />
+          <input
+            type="text"
+            placeholder="Thumbnail URL"
+            value={thumbnail}
+            onChange={(e) => setThumbnail(e.target.value)}
+            className="w-full px-4 py-2 border rounded-md text-gray-800"
+          />
+          <input
+            type="url"
+            placeholder="Book / Video Link"
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            className="w-full px-4 py-2 border rounded-md text-gray-800"
+          />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Schedule Date
+              </label>
+              <input
+                type="date"
+                value={scheduledDate}
+                onChange={(e) => setScheduledDate(e.target.value)}
+                min={getCurrentDateTime().date}
+                className="w-full px-4 py-2 border rounded-md text-gray-800"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Schedule Time
+              </label>
+              <input
+                type="time"
+                value={scheduledTime}
+                onChange={(e) => setScheduledTime(e.target.value)}
+                className="w-full px-4 py-2 border rounded-md text-gray-800"
+                required
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className={`w-full py-2 rounded-md font-semibold transition ${
+              loading
+                ? "bg-gray-400 text-white cursor-not-allowed"
+                : "bg-pink-600 text-white hover:bg-pink-700"
+            }`}
+          >
+            {loading ? "Scheduling..." : "Schedule for Later"}
+          </button>
+
+          {message && <ResponseMessage message={message} />}
+        </form>
+      ) : (
+        <div className="space-y-6">
+          {/* Pending Items */}
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800 mb-3">
+              Pending ({pendingItems.length})
+            </h3>
+            <div className="space-y-3">
+              {pendingItems.map((item) => (
+                <div key={item.id} className="border border-gray-200 rounded-lg p-4">
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <h4 className="font-medium text-gray-900">{item.title}</h4>
+                      <p className="text-sm text-gray-600">
+                        by {item.authors.join(", ")} • {item.category}
+                      </p>
+                      <p className="text-sm text-gray-500 mt-1">
+                        Scheduled: {new Date(item.scheduledDate).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 ml-4">
+                      <button
+                        onClick={() => handlePublishNow(item)}
+                        className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
+                      >
+                        Publish Now
+                      </button>
+                      <button
+                        onClick={() => handleDeleteScheduled(item.id)}
+                        className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {pendingItems.length === 0 && (
+                <p className="text-gray-500">No pending scheduled items</p>
+              )}
+            </div>
+          </div>
+
+          {/* Published Items */}
+          {publishedItems.length > 0 && (
+            <div>
+              <h3 className="text-lg font-semibold text-green-600 mb-3">
+                Published ({publishedItems.length})
+              </h3>
+              <div className="space-y-2">
+                {publishedItems.map((item) => (
+                  <div key={item.id} className="border border-green-200 rounded-lg p-3 bg-green-50">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <h4 className="font-medium text-gray-900">{item.title}</h4>
+                        <p className="text-sm text-gray-600">
+                          Published • {item.category}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteScheduled(item.id)}
+                        className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Failed Items */}
+          {failedItems.length > 0 && (
+            <div>
+              <h3 className="text-lg font-semibold text-red-600 mb-3">
+                Failed ({failedItems.length})
+              </h3>
+              <div className="space-y-2">
+                {failedItems.map((item) => (
+                  <div key={item.id} className="border border-red-200 rounded-lg p-3 bg-red-50">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <h4 className="font-medium text-gray-900">{item.title}</h4>
+                        <p className="text-sm text-red-600">
+                          Publish failed • {item.category}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handlePublishNow(item)}
+                          className="px-2 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600"
+                        >
+                          Retry
+                        </button>
+                        <button
+                          onClick={() => handleDeleteScheduled(item.id)}
+                          className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -355,7 +755,7 @@ function UpdateForm() {
           />
 
           <div>
-            <p className="font-medium mb-2 text-gray-800">Categories:</p>
+            <p className="font-medium mb-2 text-gray-900">Categories:</p>
             <div className="flex flex-wrap gap-2">
               {availableCategories.map((cat) => (
                 <label
@@ -591,7 +991,7 @@ function CheckboxGroup({
 }) {
   return (
     <div>
-      <p className="font-medium mb-2">Categories:</p>
+      <p className="font-medium mb-2 text-gray-900">Categories:</p>
       <div className="flex flex-wrap gap-2">
         {DISCOVERY_CATEGORIES.map((cat) => (
           <label
