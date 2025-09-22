@@ -11,6 +11,8 @@
   "dependencies": {
     "@firebase/firestore": "^4.9.0",
     "@sendgrid/mail": "^8.1.5",
+    "@vercel/blob": "^2.0.0",
+    "cloudinary": "^2.7.0",
     "firebase": "^12.0.0",
     "firebase-admin": "^13.5.0",
     "firebase-functions": "^6.4.0",

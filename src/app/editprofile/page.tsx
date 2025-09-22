@@ -12,7 +12,6 @@ import {
 import { doc, getDoc, updateDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { EyeIcon, EyeOffIcon } from "lucide-react";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 // ---------------- Child Interface ----------------
 interface Child {
@@ -24,7 +23,6 @@ interface Child {
   interests?: string;
   readingLevel?: string;
 }
-
 
 export default function EditProfilePage() {
   const [user, setUser] = useState<User | null>(null);
@@ -55,11 +53,10 @@ export default function EditProfilePage() {
   const [childNewPassword, setChildNewPassword] = useState("");
   const [showChildNewPassword, setShowChildNewPassword] = useState(false);
 
-  // Child Perference
+  // Child Preferences
   const [childAgeRange, setChildAgeRange] = useState("");
   const [childInterests, setChildInterests] = useState("");
   const [childReadingLevel, setChildReadingLevel] = useState("");
-
 
   // Loading states
   const [loading, setLoading] = useState(true);
@@ -67,7 +64,6 @@ export default function EditProfilePage() {
   const [uploading, setUploading] = useState(false);
 
   const router = useRouter();
-  const storage = getStorage();
 
   // -----------------------
   // Load user info & children if parent
@@ -92,38 +88,37 @@ export default function EditProfilePage() {
           setInterests(data.interests || "");
           setReadingLevel(data.readingLevel || "");
 
-// --- Inside your useEffect (load user info) ---
-if (data.role === "parent" || data.role === "educator") {
-  const roleKey = data.role === "parent" ? "parentId" : "educatorId";
-  const q = query(collection(db, "users"), where(roleKey, "==", currentUser.uid));
-  const snapshot = await getDocs(q);
+          // --- Load children/students ---
+          if (data.role === "parent" || data.role === "educator") {
+            const roleKey = data.role === "parent" ? "parentId" : "educatorId";
+            const q = query(collection(db, "users"), where(roleKey, "==", currentUser.uid));
+            const snapshot = await getDocs(q);
 
-  const kids: Child[] = snapshot.docs.map(docSnap => {
-    const docData = docSnap.data();
-    return {
-      id: docSnap.id,
-      fullName: docData.fullName || "",
-      email: docData.email || "",
-      restrictions: docData.restrictions || [],
-      ageRange: docData.ageRange || "",
-      interests: docData.interests || "",
-      readingLevel: docData.readingLevel || "",
-    };
-  });
+            const kids: Child[] = snapshot.docs.map(docSnap => {
+              const docData = docSnap.data();
+              return {
+                id: docSnap.id,
+                fullName: docData.fullName || "",
+                email: docData.email || "",
+                restrictions: docData.restrictions || [],
+                ageRange: docData.ageRange || "",
+                interests: docData.interests || "",
+                readingLevel: docData.readingLevel || "",
+              };
+            });
 
-  setChildren(kids);
+            setChildren(kids);
 
-  if (kids.length > 0) {
-    const firstChild = kids[0];
-    setSelectedChild(firstChild);
-    setChildFullName(firstChild.fullName);
-    setChildRestrictions(firstChild.restrictions.join(", "));
-    setChildAgeRange(firstChild.ageRange || "");
-    setChildInterests(firstChild.interests || "");
-    setChildReadingLevel(firstChild.readingLevel || "");
-  }
-}
-
+            if (kids.length > 0) {
+              const firstChild = kids[0];
+              setSelectedChild(firstChild);
+              setChildFullName(firstChild.fullName);
+              setChildRestrictions(firstChild.restrictions.join(", "));
+              setChildAgeRange(firstChild.ageRange || "");
+              setChildInterests(firstChild.interests || "");
+              setChildReadingLevel(firstChild.readingLevel || "");
+            }
+          }
         }
       } catch (err) {
         console.error("Error fetching user data:", err);
@@ -136,30 +131,87 @@ if (data.role === "parent" || data.role === "educator") {
   }, [router]);
 
   // -----------------------
-  // Avatar upload
+  // Avatar upload with Cloudinary
   // -----------------------
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!user || !e.target.files?.[0]) return;
-    const file = e.target.files[0];
-    setUploading(true);
+  // Replace your handleAvatarUpload function with this improved TypeScript version
 
-    try {
-      const storageRef = ref(storage, `avatars/${user.uid}`);
-      await uploadBytes(storageRef, file);
-      const downloadURL = await getDownloadURL(storageRef);
+const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  if (!user || !e.target.files?.[0]) return;
+  
+  const file = e.target.files[0];
+  
+  // Validate file type
+  if (!file.type.startsWith('image/')) {
+    alert('Please select a valid image file.');
+    return;
+  }
+  
+  // Validate file size (5MB limit)
+  if (file.size > 5 * 1024 * 1024) {
+    alert('Please select an image smaller than 5MB.');
+    return;
+  }
+  
+  setUploading(true);
 
-      await updateDoc(doc(db, "users", user.uid), { avatar: downloadURL });
-      await updateProfile(user, { photoURL: downloadURL });
-      setAvatar(downloadURL);
+  try {
+    const reader = new FileReader();
+    
+    reader.onloadend = async () => {
+      try {
+        const base64 = reader.result as string;
+        
+        const response = await fetch('/api/upload-avatar', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            image: base64,
+            userId: user.uid
+          })
+        });
 
-      alert("Avatar updated successfully!");
-    } catch (err) {
-      console.error(err);
-      alert("Failed to upload avatar.");
-    } finally {
+        // Check if response is ok
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data: { url?: string; error?: string } = await response.json();
+        
+        if (data.url) {
+          // Update Firestore and Firebase Auth
+          await updateDoc(doc(db, "users", user.uid), { avatar: data.url });
+          await updateProfile(user, { photoURL: data.url });
+          setAvatar(data.url);
+          alert("Avatar updated successfully!");
+        } else {
+          throw new Error(data.error || 'Upload failed');
+        }
+        
+      } catch (err) {
+        console.error('Upload error:', err);
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+        alert(`Failed to upload avatar: ${errorMessage}`);
+      } finally {
+        setUploading(false);
+      }
+    };
+    
+    reader.onerror = () => {
+      console.error('FileReader error');
+      alert('Failed to read the selected file.');
       setUploading(false);
-    }
-  };
+    };
+    
+    reader.readAsDataURL(file);
+    
+  } catch (err) {
+    console.error('File processing error:', err);
+    alert('Failed to process the selected file.');
+    setUploading(false);
+  }
+};
 
   // -----------------------
   // Update parent profile
@@ -272,11 +324,17 @@ if (data.role === "parent" || data.role === "educator") {
         ageRange: childAgeRange,
         interests: childInterests,
         readingLevel: childReadingLevel,
-
       });
 
       alert("Child profile updated successfully!");
-      setChildren(prev => prev.map(c => c.id === selectedChild.id ? { ...c, fullName: childFullName, restrictions: restrictionsArray } : c));
+      setChildren(prev => prev.map(c => c.id === selectedChild.id ? { 
+        ...c, 
+        fullName: childFullName, 
+        restrictions: restrictionsArray,
+        ageRange: childAgeRange,
+        interests: childInterests,
+        readingLevel: childReadingLevel
+      } : c));
     } catch (err: any) {
       console.error(err);
       alert(err.message || "Failed to update child profile");
@@ -323,21 +381,34 @@ if (data.role === "parent" || data.role === "educator") {
 
         {/* Sidebar Tabs */}
         <div className="w-48 border-r pr-4">
-          <button className={`block w-full text-left py-2 px-3 rounded-md mb-2 font-semibold ${activeTab === "profile" ? "bg-pink-100 text-pink-600" : "text-gray-600"}`} onClick={() => setActiveTab("profile")}>Profile</button>
-          <button className={`block w-full text-left py-2 px-3 rounded-md mb-2 font-semibold ${activeTab === "security" ? "bg-pink-100 text-pink-600" : "text-gray-600"}`} onClick={() => setActiveTab("security")}>Security</button>
+          <button 
+            className={`block w-full text-left py-2 px-3 rounded-md mb-2 font-semibold ${
+              activeTab === "profile" ? "bg-pink-100 text-pink-600" : "text-gray-600"
+            }`} 
+            onClick={() => setActiveTab("profile")}
+          >
+            Profile
+          </button>
+          <button 
+            className={`block w-full text-left py-2 px-3 rounded-md mb-2 font-semibold ${
+              activeTab === "security" ? "bg-pink-100 text-pink-600" : "text-gray-600"
+            }`} 
+            onClick={() => setActiveTab("security")}
+          >
+            Security
+          </button>
 
-            {/* Only show Manage Child if NOT admin */}
-            {role && role.toLowerCase() !== "admin" && (
-              <button
-                className={`block w-full text-left py-2 px-3 rounded-md font-semibold ${
-                  activeTab === "child" ? "bg-pink-100 text-pink-600" : "text-gray-600"
-                }`}
-                onClick={() => setActiveTab("child")}
-              >
-                {role === "educator" ? "Manage Students" : "Manage Child"}
-              </button>
-            )}
-
+          {/* Only show Manage Child if NOT admin */}
+          {role && role.toLowerCase() !== "admin" && (
+            <button
+              className={`block w-full text-left py-2 px-3 rounded-md font-semibold ${
+                activeTab === "child" ? "bg-pink-100 text-pink-600" : "text-gray-600"
+              }`}
+              onClick={() => setActiveTab("child")}
+            >
+              {role === "educator" ? "Manage Students" : "Manage Child"}
+            </button>
+          )}
         </div>
 
         <div className="flex-1 space-y-6">
@@ -354,80 +425,78 @@ if (data.role === "parent" || data.role === "educator") {
                   setSelectedChild(child);
                   setChildFullName(child?.fullName || "");
                   setChildRestrictions(child?.restrictions?.join(", ") || "");
+                  setChildAgeRange(child?.ageRange || "");
+                  setChildInterests(child?.interests || "");
+                  setChildReadingLevel(child?.readingLevel || "");
                 }}
                 className="w-full px-4 py-2 border border-gray-300 rounded-md mb-4 text-gray-900"
               >
-              <option value="">
-                -- {role === "educator" ? "Choose a Student" : "Choose a Child"} --
-              </option>
+                <option value="">
+                  -- {role === "educator" ? "Choose a Student" : "Choose a Child"} --
+                </option>
                 {children.map(c => <option key={c.id} value={c.id}>{c.fullName}</option>)}
               </select>
 
-{selectedChild && (
-  <form onSubmit={handleUpdateChild} className="flex flex-col gap-3 mb-4">
-    <input
-      type="text"
-      value={childFullName}
-      onChange={e => setChildFullName(e.target.value)}
-      placeholder="Child Full Name"
-      className="text-gray-900 w-full px-4 py-2 border border-gray-300 rounded-md"
-    />
+              {selectedChild && (
+                <form onSubmit={handleUpdateChild} className="flex flex-col gap-3 mb-4">
+                  <input
+                    type="text"
+                    value={childFullName}
+                    onChange={e => setChildFullName(e.target.value)}
+                    placeholder="Child Full Name"
+                    className="text-gray-900 w-full px-4 py-2 border border-gray-300 rounded-md"
+                  />
 
-    <input
-      type="text"
-      value={childRestrictions}
-      onChange={e => setChildRestrictions(e.target.value)}
-      placeholder="Restrictions (comma separated)"
-      className="text-gray-900 w-full px-4 py-2 border border-gray-300 rounded-md"
-    />
+                  <input
+                    type="text"
+                    value={childRestrictions}
+                    onChange={e => setChildRestrictions(e.target.value)}
+                    placeholder="Restrictions (comma separated)"
+                    className="text-gray-900 w-full px-4 py-2 border border-gray-300 rounded-md"
+                  />
 
-    {/* --- Preferences now under Manage Child --- */}
-    <label className="text-sm font-medium text-gray-700">Age Range</label>
-    <select
-      value={childAgeRange}
-      onChange={e => setChildAgeRange(e.target.value)}
-      className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900"
-    >
-      <option value="">Select Age Range</option>
-      <option value="1-3">1–3</option>
-      <option value="4-6">4–6</option>
-      <option value="7-10">7–10</option>
-      <option value="11-12">11–12</option>
-    </select>
+                  <label className="text-sm font-medium text-gray-700">Age Range</label>
+                  <select
+                    value={childAgeRange}
+                    onChange={e => setChildAgeRange(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900"
+                  >
+                    <option value="">Select Age Range</option>
+                    <option value="1-3">1–3</option>
+                    <option value="4-6">4–6</option>
+                    <option value="7-10">7–10</option>
+                    <option value="11-12">11–12</option>
+                  </select>
 
-    <label className="text-sm font-medium text-gray-700">Interests</label>
-    <input
-      type="text"
-      value={childInterests}
-      onChange={e => setChildInterests(e.target.value)}
-      placeholder="e.g. Fantasy, Science, History"
-      className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900"
-    />
+                  <label className="text-sm font-medium text-gray-700">Interests</label>
+                  <input
+                    type="text"
+                    value={childInterests}
+                    onChange={e => setChildInterests(e.target.value)}
+                    placeholder="e.g. Fantasy, Science, History"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900"
+                  />
 
-    <label className="text-sm font-medium text-gray-700">Reading Level</label>
-    <select
-      value={childReadingLevel}
-      onChange={e => setChildReadingLevel(e.target.value)}
-      className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900"
-    >
-      <option value="">Select Reading Level</option>
-      <option value="beginner">Beginner</option>
-      <option value="intermediate">Intermediate</option>
-      <option value="advanced">Advanced</option>
-    </select>
+                  <label className="text-sm font-medium text-gray-700">Reading Level</label>
+                  <select
+                    value={childReadingLevel}
+                    onChange={e => setChildReadingLevel(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900"
+                  >
+                    <option value="">Select Reading Level</option>
+                    <option value="beginner">Beginner</option>
+                    <option value="intermediate">Intermediate</option>
+                    <option value="advanced">Advanced</option>
+                  </select>
 
-      <button
-        className={`w-full py-2 bg-pink-600 text-white rounded-md font-semibold hover:bg-pink-700 transition ${
-          activeTab === "child" ? "bg-pink-100 text-pink-600" : "text-gray-600"
-        }`}
-        onClick={() => setActiveTab("child")}
-      >
-        {role === "educator" ? "Update Student" : "Update Child"}
-      </button>
-
-  </form>
-)}
-
+                  <button
+                    type="submit"
+                    className="w-full py-2 bg-pink-600 text-white rounded-md font-semibold hover:bg-pink-700 transition"
+                  >
+                    {role === "educator" ? "Update Student" : "Update Child"}
+                  </button>
+                </form>
+              )}
 
               {selectedChild && (
                 <form onSubmit={handleUpdateChildPassword} className="flex flex-col gap-3">
@@ -450,14 +519,11 @@ if (data.role === "parent" || data.role === "educator") {
                     </button>
                   </div>
                   <button
-                    className={`w-full py-2 bg-purple-600 text-white rounded-md font-semibold hover:bg-purple-700 transition ${
-                      activeTab === "child" ? "bg-pink-100 text-pink-600" : "text-gray-600"
-                    }`}
-                    onClick={() => setActiveTab("child")}
+                    type="submit"
+                    className="w-full py-2 bg-purple-600 text-white rounded-md font-semibold hover:bg-purple-700 transition"
                   >
                     {role === "educator" ? "Update Student Password" : "Update Child Password"}
                   </button>
-
                 </form>
               )}
             </div>
@@ -467,17 +533,17 @@ if (data.role === "parent" || data.role === "educator") {
           {activeTab === "profile" && (
             <form onSubmit={handleUpdateProfile} className="bg-white p-6 rounded-xl shadow-md border border-gray-200 space-y-4">
               {/* Avatar */}
-{/*               <div className="flex flex-col items-center">
+              <div className="flex flex-col items-center">
                 <img
-                  src={avatar || "/default-avatar.png"}
+                  src={avatar || "./default-avatar.jpg"}
                   alt="avatar"
-                  className="w-24 h-24 rounded-full object-cover border mb-3"
+                  className="w-24 h-24 rounded-full object-cover text-gray-900 border mb-3"
                 />
                 <label className="cursor-pointer text-pink-600 hover:underline">
                   {uploading ? "Uploading..." : "Change Avatar"}
                   <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
                 </label>
-              </div> */}
+              </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-800 mb-1">Full Name</label>
