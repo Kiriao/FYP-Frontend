@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
@@ -14,6 +15,7 @@ export default function Navbar() {
   const [role, setRole] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
 
   useEffect(() => {
     let unsubscribeFirestore: (() => void) | undefined;
@@ -65,6 +67,8 @@ export default function Navbar() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
+      // Redirect to homepage after successful logout
+      router.push('/');
     } catch (error) {
       console.error("Error logging out:", error);
     }
