@@ -18,9 +18,16 @@ import {
 interface Plan {
   id: string;
   name: string;
-  price: number; // ✅ use number instead of string
+  price: number;
   features: string[];
   isFree?: boolean;
+}
+
+interface UserPlanInfo {
+  planName: string;
+  expiresAt?: any; // Firestore timestamp
+  isActive?: boolean;
+  remainingDays?: number;
 }
 
 export default function SubscriptionPage() {
@@ -30,6 +37,36 @@ export default function SubscriptionPage() {
   const [loading, setLoading] = useState(true);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+  const [userPlanInfo, setUserPlanInfo] = useState<UserPlanInfo | null>(null);
+
+  // ✅ Helper functions for expiry checking
+  const isPlanExpired = (expirationDate: any): boolean => {
+    if (!expirationDate) return true;
+    
+    const expDate = expirationDate.toDate ? expirationDate.toDate() : new Date(expirationDate);
+    return new Date() > expDate;
+  };
+
+  const getRemainingDays = (expirationDate: any): number => {
+    if (!expirationDate) return 0;
+    
+    const expDate = expirationDate.toDate ? expirationDate.toDate() : new Date(expirationDate);
+    const diffTime = expDate.getTime() - new Date().getTime();
+    return Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+  };
+
+  // ✅ Handle expired plans
+  const handleExpiredPlan = async (userRef: any) => {
+    console.log("Plan has expired, downgrading to Free Plan");
+    
+    await updateDoc(userRef, {
+      plan: "Free Plan",
+      isActive: false,
+      planExpiredAt: new Date(),
+    });
+
+    return "Free Plan";
+  };
 
   // ✅ Fetch plans from Firestore in ascending order by price
   const fetchPlans = async () => {
@@ -42,9 +79,7 @@ export default function SubscriptionPage() {
         ...(docSnap.data() as Omit<Plan, "id">),
       }));
 
-      // Fallback safety: sort in case Firestore returns unsorted
       plansList = plansList.sort((a, b) => a.price - b.price);
-
       setPlans(plansList);
     } catch (error) {
       console.error("Error fetching plans:", error);
@@ -64,12 +99,42 @@ export default function SubscriptionPage() {
 
           let currentPlanName = "Free Plan";
           const userData = userSnap.data();
+          
+          // ✅ Check if user has a plan and if it's expired
+          if (userData.plan && userData.plan !== "Free Plan") {
+            const planExpiresAt = userData.planExpiresAt;
+            const isActive = userData.isActive;
 
-          if (userData.plan) {
-            currentPlanName = userData.plan;
+            if (planExpiresAt && !isPlanExpired(planExpiresAt) && isActive) {
+              // Plan is still valid
+              currentPlanName = userData.plan;
+              const remainingDays = getRemainingDays(planExpiresAt);
+              
+              setUserPlanInfo({
+                planName: currentPlanName,
+                expiresAt: planExpiresAt,
+                isActive: true,
+                remainingDays,
+              });
+            } else {
+              // Plan has expired or is inactive
+              currentPlanName = await handleExpiredPlan(userRef);
+              setUserPlanInfo({
+                planName: currentPlanName,
+                isActive: false,
+              });
+            }
           } else {
-            await updateDoc(userRef, { plan: "Free Plan" }).catch(async () => {
-              await setDoc(userRef, { plan: "Free Plan" }, { merge: true });
+            // No plan or already on Free Plan
+            if (!userData.plan) {
+              await updateDoc(userRef, { plan: "Free Plan" }).catch(async () => {
+                await setDoc(userRef, { plan: "Free Plan" }, { merge: true });
+              });
+            }
+            
+            setUserPlanInfo({
+              planName: "Free Plan",
+              isActive: true,
             });
           }
 
@@ -110,6 +175,10 @@ export default function SubscriptionPage() {
 
     if (plan.isFree) {
       alert(`You are now on the ${plan.name}`);
+      setUserPlanInfo({
+        planName: plan.name,
+        isActive: true,
+      });
     }
   };
 
@@ -128,6 +197,39 @@ export default function SubscriptionPage() {
           Select the subscription plan that fits your needs and enjoy safe, curated content for your kids.
         </p>
 
+        {/* ✅ Show current plan status */}
+        {userPlanInfo && isRegistered && (
+          <div className={`mb-8 p-4 rounded-lg ${
+            userPlanInfo.isActive && userPlanInfo.remainingDays 
+              ? userPlanInfo.remainingDays <= 3 
+                ? "bg-red-100 border border-red-300" 
+                : "bg-green-100 border border-green-300"
+              : "bg-gray-100 border border-gray-300"
+          }`}>
+            <h3 className="text-lg font-semibold mb-2 text-gray-700">Current Plan Status</h3>
+            <p className="text-gray-700">
+              You are currently on: <span className="font-bold text-pink-600">{userPlanInfo.planName}</span>
+            </p>
+            
+            {userPlanInfo.remainingDays !== undefined && userPlanInfo.remainingDays > 0 && (
+              <p className={`text-sm mt-1 ${
+                userPlanInfo.remainingDays <= 3 ? "text-red-600 font-semibold" : "text-gray-600"
+              }`}>
+                {userPlanInfo.remainingDays <= 3 
+                  ? `⚠️ Expires in ${userPlanInfo.remainingDays} day${userPlanInfo.remainingDays === 1 ? '' : 's'}!`
+                  : `Valid for ${userPlanInfo.remainingDays} more days`
+                }
+              </p>
+            )}
+            
+            {userPlanInfo.planName !== "Free Plan" && (!userPlanInfo.isActive || userPlanInfo.remainingDays === 0) && (
+              <p className="text-red-600 font-semibold text-sm mt-1">
+                🚫 Plan has expired - You've been moved to the Free Plan
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="grid md:grid-cols-4 gap-8">
           {plans.map((plan) => (
             <div
@@ -138,10 +240,24 @@ export default function SubscriptionPage() {
                   : "border-gray-200 hover:scale-[1.02]"
               }`}
             >
+              {/* ✅ Show "Current Plan" badge */}
+              {selectedPlan?.id === plan.id && (
+                <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                  <span className="bg-pink-600 text-white px-3 py-1 rounded-full text-sm font-semibold">
+                    Current Plan
+                  </span>
+                </div>
+              )}
+
               <h2 className="text-2xl font-bold text-pink-600 mb-4">{plan.name}</h2>
-              <p className="text-gray-900 text-xl font-semibold mb-6">
+              <p className="text-gray-900 text-xl font-semibold mb-2">
                 $ {plan.price.toFixed(2)}
               </p>
+              
+              {/* ✅ Show validity period for paid plans */}
+              {!plan.isFree && plan.price > 0 && (
+                <p className="text-gray-600 text-sm mb-4">Valid for 30 days</p>
+              )}
 
               <ul className="text-gray-700 mb-6 space-y-2">
                 {plan.features.map((feature, idx) => (

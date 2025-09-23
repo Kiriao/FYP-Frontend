@@ -62,20 +62,28 @@ export default function CheckoutClient() {
         return;
       }
 
-      // 1️⃣ Update user's active plan
+      // 🔹 Calculate expiration date (30 days from now)
+      const currentDate = new Date();
+      const expirationDate = new Date(currentDate.getTime() + (30 * 24 * 60 * 60 * 1000)); // 30 days in milliseconds
+
+      // 1️⃣ Update user's active plan with expiration date
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
         plan: planName,
         planUpdatedAt: serverTimestamp(),
+        planExpiresAt: expirationDate, // ✅ Add expiration date
+        isActive: true, // ✅ Mark as active
       });
 
-      // 2️⃣ Add subscription record (history)
+      // 2️⃣ Add subscription record (history) with expiration
       await addDoc(collection(db, "subscriptions"), {
         userId: user.uid,
         plan: planName,
         amount: price, // string value from Firestore
         status: "paid",
         createdAt: serverTimestamp(),
+        expiresAt: expirationDate, // ✅ Add expiration date to subscription record
+        isActive: true, // ✅ Mark as active
       });
 
       // 3️⃣ Redirect to confirmation page
@@ -102,8 +110,11 @@ export default function CheckoutClient() {
         <p className="text-lg text-gray-700 mb-4">
           You selected: <span className="font-semibold text-pink-600">{planName}</span>
         </p>
-        <p className="text-gray-600 mb-8">
+        <p className="text-gray-600 mb-4">
           Price: <span className="font-semibold text-pink-600">${price}</span>
+        </p>
+        <p className="text-gray-600 mb-8">
+          <span className="font-semibold">Valid for 30 days</span> from the date of purchase.
         </p>
         <p className="text-gray-600 mb-8">Confirm your subscription to continue.</p>
 
