@@ -1412,4 +1412,4 @@ export default function DiscoverPage() {
       )}
     </main> 
   );
-}
+} 
