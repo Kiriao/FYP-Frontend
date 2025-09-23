@@ -1410,6 +1410,6 @@ export default function DiscoverPage() {
           <DialogflowMessenger />
         </>
       )}
-    </main>
+    </main> 
   );
 }
