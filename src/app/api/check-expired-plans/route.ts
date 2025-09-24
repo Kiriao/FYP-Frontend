@@ -30,7 +30,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // Get current time in Singapore timezone
+    const sgTime = new Date().toLocaleString("en-US", {timeZone: "Asia/Singapore"});
+    const utcTime = new Date().toISOString();
+    
     console.log('🕐 Starting scheduled plan expiry check...');
+    console.log(`🇸🇬 Singapore Time: ${sgTime}`);
+    console.log(`🌍 UTC Time: ${utcTime}`);
 
     // Get all users with active plans
     const usersRef = collection(db, 'users');
@@ -88,9 +94,12 @@ export async function GET(request: NextRequest) {
         
         const subsSnapshot = await getDocs(subscriptionsQuery);
         subsSnapshot.docs.forEach(subDoc => {
+          const subData = subDoc.data();
           batch.update(subDoc.ref, {
             isActive: false,
             expiredAt: now,
+            // ✅ Keep trial info for records
+            ...(subData.isTrial && { trialCompleted: true })
           });
         });
 
@@ -158,4 +167,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-} 
+}
