@@ -63,6 +63,9 @@ interface Review {
   type: 'book' | 'video';
   title: string;
   createdAt: Timestamp;
+  heartCount?: number; // Add heart count to review
+  userHasHearted?: boolean; // Track if current user hearted this review
+
 }
 
 interface ContentItem {
@@ -107,6 +110,15 @@ interface UsageData {
   totalMinutes: number;
   lastActivity: Timestamp;
 }
+
+interface ReviewHeart {
+  id: string;
+  reviewId: string;
+  userId: string;
+  userName: string;
+  createdAt: Timestamp;
+}
+
 
 type ScreenTimeStatus = 'within-limits' | 'approaching-limit' | 'limit-exceeded' | 'bedtime' | 'disabled';
 
@@ -189,6 +201,35 @@ export default function DiscoverPage() {
   const [screenTimeMessage, setScreenTimeMessage] = useState<string | null>(null);
   const [sessionStartTime, setSessionStartTime] = useState<Date>(new Date());
 
+  // Heart Comments
+  const [reviewHearts, setReviewHearts] = useState<Record<string, ReviewHeart[]>>({});
+
+  async function loadHeartsForReviews(reviewIds: string[]) {
+  if (!user || reviewIds.length === 0) return;
+
+  try {
+    const heartsMap: Record<string, ReviewHeart[]> = {};
+    
+    // Load hearts for each review
+    for (const reviewId of reviewIds) {
+      const heartsRef = collection(db, 'review-hearts');
+      const q = query(heartsRef, where('reviewId', '==', reviewId));
+      const snap = await getDocs(q);
+      
+      const hearts: ReviewHeart[] = [];
+      snap.forEach((doc) => {
+        hearts.push({ id: doc.id, ...doc.data() } as ReviewHeart);
+      });
+      
+      heartsMap[reviewId] = hearts;
+    }
+    
+    setReviewHearts(heartsMap);
+  } catch (error) {
+    console.error('Failed to load review hearts:', error);
+  }
+}
+
   // Type guards & helpers (keeping existing ones)
   const isBook = (item: Book | Video | ContentItem): item is Book => 
     (item as any).id !== undefined && (item as any).videoId === undefined && (item as any).filename === undefined;
@@ -269,6 +310,68 @@ export default function DiscoverPage() {
         return null;
     }
   };
+
+  async function toggleReviewHeart(reviewId: string, reviewUserId: string) {
+  if (!user) return alert('Please log in to heart comments.');
+  if (user.uid === reviewUserId) return alert('You cannot heart your own comment.');
+  
+  // Check screen time restrictions
+  const itemType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
+  if (!canAccessContent(itemType)) {
+    alert(getScreenTimeMessage() || 'Content access is restricted.');
+    return;
+  }
+
+  try {
+    const heartsRef = collection(db, 'review-hearts');
+    const q = query(heartsRef, 
+      where('reviewId', '==', reviewId),
+      where('userId', '==', user.uid)
+    );
+    const existingHearts = await getDocs(q);
+    
+    if (!existingHearts.empty) {
+      // Remove heart
+      const heartDoc = existingHearts.docs[0];
+      await deleteDoc(heartDoc.ref);
+      
+      // Update local state
+      setReviewHearts(prev => ({
+        ...prev,
+        [reviewId]: prev[reviewId]?.filter(heart => heart.userId !== user.uid) || []
+      }));
+    } else {
+      // Add heart
+      const newHeart: Omit<ReviewHeart, 'id'> = {
+        reviewId,
+        userId: user.uid,
+        userName: user.displayName || 'Anonymous',
+        createdAt: Timestamp.now()
+      };
+      
+      const heartDocRef = await addDoc(heartsRef, newHeart);
+      
+      // Update local state
+      setReviewHearts(prev => ({
+        ...prev,
+        [reviewId]: [...(prev[reviewId] || []), { id: heartDocRef.id, ...newHeart }]
+      }));
+    }
+  } catch (error) {
+    console.error('Failed to toggle heart:', error);
+    alert('Failed to update heart. Please try again.');
+  }
+}
+
+function hasUserHearted(reviewId: string): boolean {
+  if (!user) return false;
+  return reviewHearts[reviewId]?.some(heart => heart.userId === user.uid) || false;
+}
+
+function getHeartCount(reviewId: string): number {
+  return reviewHearts[reviewId]?.length || 0;
+}
+
 
   const formatMinutes = (minutes: number): string => {
     const hours = Math.floor(minutes / 60);
@@ -689,6 +792,7 @@ export default function DiscoverPage() {
       setFavourites([...favourites, newFav]);
     }
   }
+  
 
   async function submitReview() {
     if (!user || !selectedItem) return;
@@ -714,22 +818,28 @@ export default function DiscoverPage() {
     await loadReviewsForItem(key);
   }
 
-  async function loadReviewsForItem(itemId: string) {
-    const qRef = query(
-      collection(db, 'books-video-reviews'),
-      where('itemId', '==', itemId),
-      orderBy('createdAt', 'desc'),
-      limit(3)
-    );
-    const snap = await getDocs(qRef);
-    const revs: Review[] = [];
-    snap.forEach((doc) => revs.push({ id: doc.id, ...(doc.data() as any) } as Review));
-    setReviewsMap((prev) => ({ ...prev, [itemId]: revs }));
+async function loadReviewsForItem(itemId: string) {
+  const qRef = query(
+    collection(db, 'books-video-reviews'),
+    where('itemId', '==', itemId),
+    orderBy('createdAt', 'desc'),
+    limit(3)
+  );
+  const snap = await getDocs(qRef);
+  const revs: Review[] = [];
+  snap.forEach((doc) => revs.push({ id: doc.id, ...(doc.data() as any) } as Review));
+  setReviewsMap((prev) => ({ ...prev, [itemId]: revs }));
+  
+  // Load hearts for these reviews
+  const reviewIds = revs.map(r => r.id);
+  if (reviewIds.length > 0) {
+    await loadHeartsForReviews(reviewIds);
   }
+}
 
   async function reportReview(reviewId: string) {
     if (!user) return;
-    const reason = prompt('Optional: reason for reporting this review');
+    const reason = prompt('Optional: reason for reporting this comment');
     if (reason === null) return;
     await addDoc(collection(db, 'reports'), {
       reviewId,
@@ -737,7 +847,7 @@ export default function DiscoverPage() {
       reason,
       createdAt: Timestamp.now(),
     });
-    alert('Review reported. Admin will check it.');
+    alert('Comment reported. Admin will check it.');
   }
 
   async function reportContent(item: Book | Video | ContentItem, type: 'book' | 'video') {
@@ -1731,7 +1841,7 @@ export default function DiscoverPage() {
                     className={`px-3 py-1 rounded-lg border text-green-600 ${!canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') ? 'opacity-50 cursor-not-allowed' : ''}`}
                     disabled={!canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video')}
                   >
-                    Leave Review
+                    Leave Comment
                   </button>
                   <button
                     onClick={() => reportContent(selectedItem, (mode === 'books' || mode === 'collection-books') ? 'book' : 'video')}
@@ -1744,52 +1854,94 @@ export default function DiscoverPage() {
             </div>
 
             <div className="mt-3">
-              <h3 className="font-semibold mb-1">Reviews</h3>
+              <h3 className="font-semibold mb-1">Comments</h3>
 
               {reviewsMap[getItemId(selectedItem)]?.length ? (
-                reviewsMap[getItemId(selectedItem)].map((r) => (
-                  <div key={r.id} className="border border-[#eee] p-2 rounded-lg mb-1 text-sm">
-                    <strong>{r.userName}</strong>: {r.content}
-                    {user && (
-                      <button
-                        onClick={() => reportReview(r.id)}
-                        className="text-xs text-red-500 ml-2"
-                      >
-                        Report
-                      </button>
-                    )}
+              reviewsMap[getItemId(selectedItem)].map((r) => (
+                <div key={r.id} className="border border-[#eee] p-3 rounded-lg mb-2 text-sm">
+                  <div className="flex justify-between items-start mb-2">
+                    <strong>{r.userName}</strong>
+                    <div className="flex items-center gap-2">
+                      {/* Heart button */}
+                      {user && user.uid !== r.userId && canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') && (
+                        <button
+                          onClick={() => toggleReviewHeart(r.id, r.userId)}
+                          className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs transition-colors ${
+                            hasUserHearted(r.id)
+                              ? 'bg-red-100 text-red-600 hover:bg-red-200'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                          title={hasUserHearted(r.id) ? 'Remove heart' : 'Heart this comment'}
+                        >
+                          {hasUserHearted(r.id) ? '❤️' : '🤍'}
+                          <span>{getHeartCount(r.id)}</span>
+                        </button>
+                      )}
+                      
+                      {/* Show heart count even if user can't heart */}
+                      {(!user || user.uid === r.userId || !canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video')) && getHeartCount(r.id) > 0 && (
+                        <div className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600">
+                          ❤️
+                          <span>{getHeartCount(r.id)}</span>
+                        </div>
+                      )}
+                      
+                      {user && (
+                        <button
+                          onClick={() => reportReview(r.id)}
+                          className="text-xs text-red-500 hover:text-red-700"
+                        >
+                          Report
+                        </button>
+                      )}
+                    </div>
                   </div>
-                ))
-              ) : (
-                <p className="text-sm text-gray-500">No reviews yet.</p>
-              )}
-
-              {user && canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') ? (
-                <div className="mt-2">
-                  <textarea
-                    ref={reviewRef}
-                    value={reviewContent}
-                    onChange={(e) => setReviewContent(e.target.value)}
-                    placeholder="Write a review…"
-                    className="w-full border rounded-lg p-2 text-sm"
-                  />
-                  <button
-                    onClick={submitReview}
-                    className="mt-1 px-3 py-1 bg-[#111] text-white rounded-lg"
-                  >
-                    Submit
-                  </button>
+                  
+                  <p className="text-gray-700">{r.content}</p>
+                  
+                  {/* Show who hearted this comment (optional) */}
+                  {getHeartCount(r.id) > 0 && (
+                    <div className="mt-2 pt-2 border-t border-gray-100">
+                      <p className="text-xs text-gray-500">
+                        {getHeartCount(r.id) === 1 
+                          ? `${reviewHearts[r.id]?.[0]?.userName || 'Someone'} hearted this`
+                          : `${getHeartCount(r.id)} people hearted this`
+                        }
+                      </p>
+                    </div>
+                  )}
                 </div>
-              ) : !user ? (
-                <p className="text-xs text-gray-500 mt-2">
-                  <Link href="/login" className="text-gray-700 hover:text-pink-500">Login</Link> to leave a review.
-                </p>
-              ) : (
-                <p className="text-xs text-gray-500 mt-2">
-                  Content access restricted - cannot leave review.
-                </p>
-              )}
-            </div>
+              ))
+            ) : (
+              <p className="text-sm text-gray-500">No comment yet.</p>
+            )}
+
+            {user && canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') ? (
+              <div className="mt-2">
+                <textarea
+                  ref={reviewRef}
+                  value={reviewContent}
+                  onChange={(e) => setReviewContent(e.target.value)}
+                  placeholder="Write a review…"
+                  className="w-full border rounded-lg p-2 text-sm"
+                />
+                <button
+                  onClick={submitReview}
+                  className="mt-1 px-3 py-1 bg-[#111] text-white rounded-lg"
+                >
+                  Submit
+                </button>
+              </div>
+            ) : !user ? (
+              <p className="text-xs text-gray-500 mt-2">
+                <Link href="/login" className="text-gray-700 hover:text-pink-500">Login</Link> to leave a review.
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500 mt-2">
+                Content access restricted - cannot leave comment.
+              </p>
+            )}
+          </div>
           </div>
         </div>
       )}

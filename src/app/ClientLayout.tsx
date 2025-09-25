@@ -44,7 +44,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       <Footer />
 
       {/* Chatbot only shows if logged in + role is admin/user */}
-      {!loading && ["admin", "parent", "child"].includes(role?.toLowerCase() ?? "") && (
+      {!loading && ["admin", "parent", "child", "educator", "student"].includes(role?.toLowerCase() ?? "") && (
         <DialogflowMessenger />
       )}
     </>
