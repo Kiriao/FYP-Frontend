@@ -8,6 +8,7 @@ import Script from "next/script";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import DialogflowMessenger from "@/app/components/DialogflowMessenger";
+import ResponsiveWrapper from '@/app/components/ResponsiveWrapper';
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const [role, setRole] = useState<string | null>(null);
@@ -40,7 +41,9 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         />
       </head>
       <Navbar />
-      <main>{children}</main>
+      <ResponsiveWrapper>
+        <main>{children}</main>
+      </ResponsiveWrapper>
       <Footer />
 
       {/* Chatbot only shows if logged in + role is admin/user */}
