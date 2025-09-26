@@ -73,7 +73,7 @@ export default function ContactPage() {
         </div>
 
         {/* Contact Form */}
-        <form
+{/*         <form
           onSubmit={handleSubmit}
           className="bg-white p-8 rounded-xl shadow-md border border-gray-200 max-w-2xl mx-auto text-left"
         >
@@ -124,7 +124,7 @@ export default function ContactPage() {
           >
             {loading ? "Sending..." : "Send Message"}
           </button>
-        </form>
+        </form> */}
       </div>
     </section>
   );

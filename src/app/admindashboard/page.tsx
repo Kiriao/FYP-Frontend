@@ -33,6 +33,25 @@ interface PlanData { id: string; name: string; price: number; description: strin
 interface PlanSummary { plan: string; count: number; }
 interface Review { id: string; userId: string; userName: string; content: string; itemId: string; type: string; title: string; }
 interface Report { id: string; reviewId?: string; reportedBy: string; reason?: string; createdAt: any; reviewData?: Review; title?: string; itemId?: string; type?: string; }
+interface FAQItem {
+  id: string;
+  question: string;
+  answer: string;
+  category?: string;
+  createdAt: any;
+  updatedAt: any;
+}
+
+interface UserQuestion {
+  id: string;
+  question: string;
+  userEmail: string;
+  userName: string;
+  answered: boolean;
+  answer?: string;
+  createdAt: any;
+  answeredAt?: any;
+}
 
 const COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f59e0b"];
 
@@ -48,13 +67,19 @@ export default function AdminDashboard() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState<"users"|"reviews"|"contacts"|"plans"|"subscriptions"|"reports"|"reportedContent"|"analytics">("users");
+  const [activeTab, setActiveTab] = useState<"users"|"reviews"|"contacts"|"plans"|"subscriptions"|"reports"|"reportedContent"|"analytics" | "FAQs" | "userQuestions">("users");
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
   const [editForm, setEditForm] = useState({ fullName: "", email: "", role: "", plan: "" });
   const [editingPlan, setEditingPlan] = useState<PlanData | null>(null);
   const [editPlanForm, setEditPlanForm] = useState({ name: "", price: 0, description: "", features: "" });
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [newPlan, setNewPlan] = useState({ name: "", price: 0, description: "", features: "" });
+  const [faqs, setFaqs] = useState<FAQItem[]>([]);
+const [userQuestions, setUserQuestions] = useState<UserQuestion[]>([]);
+const [editingFAQ, setEditingFAQ] = useState<FAQItem | null>(null);
+const [editFAQForm, setEditFAQForm] = useState({ question: "", answer: "", category: "general" });
+const [newFAQForm, setNewFAQForm] = useState({ question: "", answer: "", category: "general" });
+
 
   // ---------------- Fetch Functions ----------------
   const fetchUsers = async () => {
@@ -73,6 +98,17 @@ export default function AdminDashboard() {
     const snap = await getDocs(collection(db, "reviews"));
     setReviews(snap.docs.map(doc => ({ ...(doc.data() as ReviewData), uid: doc.id })));
   };
+
+  const fetchFAQs = async () => {
+  const snap = await getDocs(collection(db, "faqs"));
+  setFaqs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FAQItem)));
+};
+
+const fetchUserQuestions = async () => {
+  const snap = await getDocs(collection(db, "user-questions"));
+  setUserQuestions(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserQuestion)));
+};
+
 
 // ---------------- Contact Fetch ----------------
 
@@ -136,6 +172,54 @@ const handleToggleUser = async (uid: string, role?: string) => {
   setUsers(prev =>
     prev.map(u => (u.uid === uid ? { ...u, role: newRole } : u))
   );
+};
+
+const handleAddFAQ = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!newFAQForm.question.trim() || !newFAQForm.answer.trim()) return;
+  
+  await addDoc(collection(db, "faqs"), {
+    ...newFAQForm,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  });
+  
+  setNewFAQForm({ question: "", answer: "", category: "general" });
+  fetchFAQs();
+};
+
+const handleUpdateFAQ = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!editingFAQ) return;
+  
+  await updateDoc(doc(db, "faqs", editingFAQ.id), {
+    ...editFAQForm,
+    updatedAt: new Date()
+  });
+  
+  setEditingFAQ(null);
+  fetchFAQs();
+};
+
+const handleDeleteFAQ = async (id: string) => {
+  if (!confirm("Are you sure you want to delete this FAQ?")) return;
+  await deleteDoc(doc(db, "faqs", id));
+  fetchFAQs();
+};
+
+const handleAnswerUserQuestion = async (questionId: string, answer: string) => {
+  await updateDoc(doc(db, "user-questions", questionId), {
+    answer: answer.trim(),
+    answered: true,
+    answeredAt: new Date()
+  });
+  fetchUserQuestions();
+};
+
+const handleDeleteUserQuestion = async (id: string) => {
+  if (!confirm("Are you sure you want to delete this question?")) return;
+  await deleteDoc(doc(db, "user-questions", id));
+  fetchUserQuestions();
 };
 
 
@@ -244,6 +328,8 @@ useEffect(() => {
         fetchPlans(),
         fetchReports(),
         fetchReportedContent(),
+        fetchFAQs(),
+        fetchUserQuestions()
       ]);
     } catch (err) {
       console.error(err);
@@ -264,13 +350,13 @@ useEffect(() => {
       {/* Sidebar */}
       <aside className="w-64 mr-8 border-r border-gray-200">
         <ul className="space-y-2">
-         {["users","reviews","contacts","plans","subscriptions","reports","reportedContent","analytics"].map(tab => (
+         {["users","reviews","contacts","plans","subscriptions","reports","reported Content","FAQs","userQuestions","analytics"].map(tab => (
   <li 
     key={tab} 
     className={`cursor-pointer px-4 py-2 rounded ${activeTab===tab?"bg-pink-100 font-semibold":"hover:bg-gray-100"}`} 
     onClick={()=>setActiveTab(tab as any)}
   >
-    {tab.charAt(0).toUpperCase()+tab.slice(1)}
+    {tab === "userQuestions" ? "User Questions" : tab.charAt(0).toUpperCase()+tab.slice(1)}
   </li>
 ))}
 
@@ -644,8 +730,277 @@ useEffect(() => {
   </section>
 )}
 
+{/* FAQs Management */}
+{activeTab === "FAQs" && (
+  <section>
+    <h2 className="text-2xl font-bold text-pink-600 mb-6">FAQ Management</h2>
+    
+    {/* Add New FAQ Form */}
+    <div className="mb-8 p-6 bg-gray-50 rounded-lg">
+      <h3 className="text-lg font-semibold mb-4">Add New FAQ</h3>
+      <form onSubmit={handleAddFAQ} className="space-y-4">
+        <select
+          value={newFAQForm.category}
+          onChange={(e) => setNewFAQForm({...newFAQForm, category: e.target.value})}
+          className="w-full p-3 border border-gray-300 rounded"
+        >
+          <option value="general">General</option>
+          <option value="account">Account</option>
+          <option value="features">Features</option>
+          <option value="privacy">Privacy</option>
+          <option value="billing">Billing</option>
+          <option value="technical">Technical</option>
+        </select>
+        <input
+          type="text"
+          value={newFAQForm.question}
+          onChange={(e) => setNewFAQForm({...newFAQForm, question: e.target.value})}
+          placeholder="FAQ Question"
+          className="w-full p-3 border border-gray-300 rounded"
+          required
+        />
+        <textarea
+          value={newFAQForm.answer}
+          onChange={(e) => setNewFAQForm({...newFAQForm, answer: e.target.value})}
+          placeholder="FAQ Answer"
+          rows={4}
+          className="w-full p-3 border border-gray-300 rounded"
+          required
+        />
+        <button
+          type="submit"
+          className="bg-pink-600 text-white px-6 py-2 rounded hover:bg-pink-700"
+        >
+          Add FAQ
+        </button>
+      </form>
+    </div>
 
-      </section>
+    {/* Existing FAQs */}
+    <div className="space-y-4">
+      {faqs.map(faq => (
+        <div key={faq.id} className="p-4 border rounded bg-white">
+          <div className="flex justify-between items-start mb-2">
+            <div className="flex-1">
+              <p className="font-semibold">{faq.question}</p>
+              <p className="text-gray-600 mt-1">{faq.answer}</p>
+              {faq.category && (
+                <span className="inline-block bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded mt-2">
+                  {faq.category}
+                </span>
+              )}
+            </div>
+            <div className="flex gap-2 ml-4">
+              <button
+                onClick={() => {
+                  setEditingFAQ(faq);
+                  setEditFAQForm({
+                    question: faq.question,
+                    answer: faq.answer,
+                    category: faq.category || "general"
+                  });
+                }}
+                className="px-3 py-1 bg-yellow-500 text-white rounded text-sm"
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => handleDeleteFAQ(faq.id)}
+                className="px-3 py-1 bg-red-500 text-white rounded text-sm"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+
+    {/* Edit FAQ Modal */}
+    {editingFAQ && (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-2xl">
+          <h3 className="text-xl font-bold mb-4">Edit FAQ</h3>
+          <form onSubmit={handleUpdateFAQ} className="space-y-4">
+            <select
+              value={editFAQForm.category}
+              onChange={(e) => setEditFAQForm({...editFAQForm, category: e.target.value})}
+              className="w-full p-3 border border-gray-300 rounded"
+            >
+              <option value="general">General</option>
+              <option value="account">Account</option>
+              <option value="features">Features</option>
+              <option value="privacy">Privacy</option>
+              <option value="billing">Billing</option>
+              <option value="technical">Technical</option>
+            </select>
+            <input
+              type="text"
+              value={editFAQForm.question}
+              onChange={(e) => setEditFAQForm({...editFAQForm, question: e.target.value})}
+              className="w-full p-3 border border-gray-300 rounded"
+              required
+            />
+            <textarea
+              value={editFAQForm.answer}
+              onChange={(e) => setEditFAQForm({...editFAQForm, answer: e.target.value})}
+              rows={6}
+              className="w-full p-3 border border-gray-300 rounded"
+              required
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingFAQ(null)}
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 bg-pink-600 text-white rounded"
+              >
+                Update FAQ
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )}
+  </section>
+)}
+
+{/* User Questions Management */}
+{activeTab === "userQuestions" && (
+  <section>
+    <h2 className="text-2xl font-bold text-pink-600 mb-6">User Questions</h2>
+    
+    {userQuestions.length === 0 ? (
+      <p className="text-gray-500">No user questions yet.</p>
+    ) : (
+      <div className="space-y-4">
+        {userQuestions.map(question => (
+          <div 
+            key={question.id} 
+            className={`p-4 border rounded ${
+              question.answered ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'
+            }`}
+          >
+            <div className="flex justify-between items-start mb-3">
+              <div className="flex-1">
+                <p className="font-semibold text-gray-800">{question.question}</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  Asked by: <span className="font-medium">{question.userName}</span> ({question.userEmail})
+                </p>
+                <p className="text-xs text-gray-500">
+                  {question.createdAt?.toDate ? 
+                    question.createdAt.toDate().toLocaleString() : 
+                    new Date(question.createdAt).toLocaleString()
+                  }
+                </p>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <span className={`px-2 py-1 text-xs rounded ${
+                  question.answered ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                }`}>
+                  {question.answered ? 'Answered' : 'Pending'}
+                </span>
+                <button
+                  onClick={() => handleDeleteUserQuestion(question.id)}
+                  className="px-2 py-1 bg-red-500 text-white rounded text-xs"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+
+            {question.answered ? (
+              <div className="mt-3 p-3 bg-white rounded border">
+                <p className="text-sm font-medium text-green-700">Answer:</p>
+                <p className="text-sm text-gray-700 mt-1">{question.answer}</p>
+                <p className="text-xs text-gray-500 mt-2">
+                  Answered on: {question.answeredAt?.toDate ? 
+                    question.answeredAt.toDate().toLocaleString() : 
+                    'Unknown'
+                  }
+                </p>
+              </div>
+            ) : (
+              <div className="mt-3">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Provide Answer:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Type your answer here..."
+                    className="flex-1 p-2 border border-gray-300 rounded text-sm"
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                        handleAnswerUserQuestion(question.id, e.currentTarget.value);
+                        e.currentTarget.value = '';
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={(e) => {
+                      const input = e.currentTarget.previousElementSibling as HTMLInputElement;
+                      if (input.value.trim()) {
+                        handleAnswerUserQuestion(question.id, input.value);
+                        input.value = '';
+                      }
+                    }}
+                    className="px-4 py-2 bg-green-500 text-white rounded text-sm hover:bg-green-600"
+                  >
+                    Answer
+                  </button>
+                </div>
+                
+                {/* Convert to FAQ option */}
+                <button
+                  onClick={() => {
+                    setNewFAQForm({
+                      question: question.question,
+                      answer: '',
+                      category: 'general'
+                    });
+                    setActiveTab('FAQs');
+                  }}
+                  className="mt-2 px-3 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600"
+                >
+                  Convert to FAQ
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    )}
+
+    {/* Statistics */}
+    <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="p-4 bg-white border rounded shadow text-center">
+        <p className="text-gray-500">Total Questions</p>
+        <p className="text-2xl font-bold text-pink-600">{userQuestions.length}</p>
+      </div>
+      <div className="p-4 bg-white border rounded shadow text-center">
+        <p className="text-gray-500">Answered</p>
+        <p className="text-2xl font-bold text-green-600">
+          {userQuestions.filter(q => q.answered).length}
+        </p>
+      </div>
+      <div className="p-4 bg-white border rounded shadow text-center">
+        <p className="text-gray-500">Pending</p>
+        <p className="text-2xl font-bold text-yellow-600">
+          {userQuestions.filter(q => !q.answered).length}
+        </p>
+      </div>
+    </div>
+  </section>
+)}
+
+</section>
     </main>
   );
 }
