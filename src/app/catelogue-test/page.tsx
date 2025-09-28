@@ -148,12 +148,12 @@ const bucketDisplayNames = {
 };
 
 const videoBucketDisplayNames = {
-  stories:  'Stories',
-  songs:    'Songs & Rhymes',
+  stories: 'Stories',
+  songs: 'Songs & Rhymes',
   learning: 'Learning',
-  science:  'Science',
-  math:     'Math',
-  animals:  'Animals',
+  science: 'Science',
+  math: 'Math',
+  animals: 'Animals',
   artcraft: 'Art & Crafts',
 } as const;
 
@@ -194,7 +194,7 @@ export default function DiscoverPage() {
   const [selectedItem, setSelectedItem] = useState<Book | Video | ContentItem | null>(null);
   const [reviewContent, setReviewContent] = useState('');
   const reviewRef = useRef<HTMLTextAreaElement | null>(null);
-  
+
   // Activity tracking state
   const [activities, setActivities] = useState<Activity[]>([]);
   const [showActivityPanel, setShowActivityPanel] = useState(false);
@@ -227,8 +227,8 @@ export default function DiscoverPage() {
   };
 
   const hasSelectedInterests = (): boolean => {
-  return Boolean(userProfile?.interests && userProfile.interests.length > 0);
-};
+    return Boolean(userProfile?.interests && userProfile.interests.length > 0);
+  };
 
   const shouldHighlightCategory = (categoryKey: string): boolean => {
     if (!isChildOrStudentRole() || !hasSelectedInterests()) return false;
@@ -240,9 +240,9 @@ export default function DiscoverPage() {
       // Show all buckets for non-child/student users or when no interests selected
       return Object.keys(bucketDisplayNames);
     }
-    
+
     const userInterests = getUserInterestCategories();
-    return Object.keys(bucketDisplayNames).filter(bucketKey => 
+    return Object.keys(bucketDisplayNames).filter(bucketKey =>
       userInterests.includes(bucketKey)
     );
   };
@@ -252,7 +252,7 @@ export default function DiscoverPage() {
       // Show all video buckets for non-child/student users or when no interests selected
       return Object.keys(videoBucketDisplayNames) as (keyof typeof videoBucketDisplayNames)[];
     }
-    
+
     const userInterests = getUserInterestCategories();
     return (Object.keys(videoBucketDisplayNames) as (keyof typeof videoBucketDisplayNames)[])
       .filter(bucketKey => userInterests.includes(bucketKey));
@@ -263,12 +263,12 @@ export default function DiscoverPage() {
     if (userProfile && isChildOrStudentRole() && hasSelectedInterests()) {
       const availableBuckets = getAvailableBuckets();
       const availableVideoBuckets = getAvailableVideoBuckets();
-      
+
       // Set default book bucket to first available interest
       if (availableBuckets.length > 0 && !availableBuckets.includes(bucket)) {
         setBucket(availableBuckets[0]);
       }
-      
+
       // Set default video bucket to first available interest
       if (availableVideoBuckets.length > 0 && !availableVideoBuckets.includes(videoBucket)) {
         setVideoBucket(availableVideoBuckets[0]);
@@ -285,20 +285,20 @@ export default function DiscoverPage() {
 
     try {
       const heartsMap: Record<string, ReviewHeart[]> = {};
-      
+
       for (const reviewId of reviewIds) {
         const heartsRef = collection(db, 'review-hearts');
         const q = query(heartsRef, where('reviewId', '==', reviewId));
         const snap = await getDocs(q);
-        
+
         const hearts: ReviewHeart[] = [];
         snap.forEach((doc) => {
           hearts.push({ id: doc.id, ...doc.data() } as ReviewHeart);
         });
-        
+
         heartsMap[reviewId] = hearts;
       }
-      
+
       setReviewHearts(heartsMap);
     } catch (error) {
       console.error('Failed to load review hearts:', error);
@@ -306,11 +306,11 @@ export default function DiscoverPage() {
   }
 
   // Type guards & helpers (keeping existing ones)
-  const isBook = (item: Book | Video | ContentItem): item is Book => 
+  const isBook = (item: Book | Video | ContentItem): item is Book =>
     (item as any).id !== undefined && (item as any).videoId === undefined && (item as any).filename === undefined;
-  const isVideo = (item: Book | Video | ContentItem): item is Video => 
+  const isVideo = (item: Book | Video | ContentItem): item is Video =>
     (item as any).videoId !== undefined;
-  const isContentItem = (item: Book | Video | ContentItem): item is ContentItem => 
+  const isContentItem = (item: Book | Video | ContentItem): item is ContentItem =>
     (item as any).filename !== undefined;
   const getItemId = (item: Book | Video | ContentItem) => {
     if (isBook(item)) return item.id;
@@ -360,7 +360,7 @@ export default function DiscoverPage() {
     if (!screenTimeSettings || !screenTimeSettings.enabled) return true;
     if (screenTimeStatus === 'bedtime') return false;
     if (screenTimeStatus === 'limit-exceeded') return false;
-    
+
     if (contentType === 'video' && currentUsage) {
       return currentUsage.videoMinutes < screenTimeSettings.videoLimit;
     }
@@ -370,7 +370,7 @@ export default function DiscoverPage() {
 
   const getScreenTimeMessage = (): string | null => {
     if (!screenTimeSettings || !screenTimeSettings.enabled) return null;
-    
+
     switch (screenTimeStatus) {
       case 'bedtime':
         return `Content is blocked during bedtime hours (${screenTimeSettings.bedtimeStart} - ${screenTimeSettings.bedtimeEnd}).`;
@@ -387,7 +387,7 @@ export default function DiscoverPage() {
   async function toggleReviewHeart(reviewId: string, reviewUserId: string) {
     if (!user) return alert('Please log in to heart comments.');
     if (user.uid === reviewUserId) return alert('You cannot heart your own comment.');
-    
+
     const itemType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
     if (!canAccessContent(itemType)) {
       alert(getScreenTimeMessage() || 'Content access is restricted.');
@@ -396,16 +396,16 @@ export default function DiscoverPage() {
 
     try {
       const heartsRef = collection(db, 'review-hearts');
-      const q = query(heartsRef, 
+      const q = query(heartsRef,
         where('reviewId', '==', reviewId),
         where('userId', '==', user.uid)
       );
       const existingHearts = await getDocs(q);
-      
+
       if (!existingHearts.empty) {
         const heartDoc = existingHearts.docs[0];
         await deleteDoc(heartDoc.ref);
-        
+
         setReviewHearts(prev => ({
           ...prev,
           [reviewId]: prev[reviewId]?.filter(heart => heart.userId !== user.uid) || []
@@ -417,9 +417,9 @@ export default function DiscoverPage() {
           userName: user.displayName || 'Anonymous',
           createdAt: Timestamp.now()
         };
-        
+
         const heartDocRef = await addDoc(heartsRef, newHeart);
-        
+
         setReviewHearts(prev => ({
           ...prev,
           [reviewId]: [...(prev[reviewId] || []), { id: heartDocRef.id, ...newHeart }]
@@ -505,7 +505,7 @@ export default function DiscoverPage() {
     const today = new Date().toISOString().split('T')[0];
     const updatedUsage: UsageData = {
       ...currentUsage,
-      [contentType === 'video' ? 'videoMinutes' : 'bookMinutes']: 
+      [contentType === 'video' ? 'videoMinutes' : 'bookMinutes']:
         currentUsage[contentType === 'video' ? 'videoMinutes' : 'bookMinutes'] + minutes,
       totalMinutes: currentUsage.totalMinutes + minutes,
       lastActivity: Timestamp.now(),
@@ -554,15 +554,15 @@ export default function DiscoverPage() {
   // (hasActivity, markAsRead, markAsWatched, removeActivity, loadActivities)
 
   const hasActivity = (itemId: string, type: 'book' | 'video'): boolean => {
-    return activities.some(activity => 
-      activity.itemId === itemId && 
+    return activities.some(activity =>
+      activity.itemId === itemId &&
       activity.type === type
     );
   };
 
   const markAsRead = async (book: Book | ContentItem) => {
     if (!user) return alert('Please log in to track your reading activity.');
-    
+
     if (book && !canAccessContent('book')) {
       alert(getScreenTimeMessage() || 'Content access is restricted.');
       return;
@@ -570,7 +570,7 @@ export default function DiscoverPage() {
 
     const itemId = getItemId(book);
     const activityRef = doc(db, 'users', user.uid, 'activities', itemId);
-    
+
     try {
       const newActivity: Omit<Activity, 'id'> = {
         userId: user.uid,
@@ -582,14 +582,14 @@ export default function DiscoverPage() {
         thumbnail: book.thumbnail,
         authors: book.authors
       };
-      
+
       await setDoc(activityRef, newActivity);
-      
+
       const activityWithId: Activity = { ...newActivity, id: itemId };
       setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === itemId && a.type === 'book'))]);
-      
+
       await trackContentSession('book');
-      
+
     } catch (error) {
       console.error('Failed to mark book as read:', error);
       alert('Failed to track reading activity. Please try again.');
@@ -598,7 +598,7 @@ export default function DiscoverPage() {
 
   const markAsWatched = async (video: Video) => {
     if (!user) return alert('Please log in to track your viewing activity.');
-    
+
     if (video && !canAccessContent('video')) {
       alert(getScreenTimeMessage() || 'Content access is restricted.');
       return;
@@ -606,7 +606,7 @@ export default function DiscoverPage() {
 
     const itemId = video.videoId;
     const activityRef = doc(db, 'users', user.uid, 'activities', itemId);
-    
+
     try {
       const newActivity: Omit<Activity, 'id'> = {
         userId: user.uid,
@@ -618,14 +618,14 @@ export default function DiscoverPage() {
         thumbnail: video.thumbnail,
         channel: video.channel
       };
-      
+
       await setDoc(activityRef, newActivity);
-      
+
       const activityWithId: Activity = { ...newActivity, id: itemId };
       setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === itemId && a.type === 'video'))]);
-      
+
       await updateUsage(user.uid, 'video', 5);
-      
+
     } catch (error) {
       console.error('Failed to mark video as watched:', error);
       alert('Failed to track viewing activity. Please try again.');
@@ -634,9 +634,9 @@ export default function DiscoverPage() {
 
   const removeActivity = async (itemId: string, type: 'book' | 'video') => {
     if (!user) return;
-    
+
     const activityRef = doc(db, 'users', user.uid, 'activities', itemId);
-    
+
     try {
       await deleteDoc(activityRef);
       setActivities(prev => prev.filter(a => !(a.itemId === itemId && a.type === type)));
@@ -651,12 +651,12 @@ export default function DiscoverPage() {
       const activitiesRef = collection(db, 'users', uid, 'activities');
       const q = query(activitiesRef, orderBy('createdAt', 'desc'));
       const snapshot = await getDocs(q);
-      
+
       const userActivities: Activity[] = [];
       snapshot.forEach(doc => {
         userActivities.push({ id: doc.id, ...doc.data() } as Activity);
       });
-      
+
       setActivities(userActivities);
     } catch (error) {
       console.error('Failed to load activities:', error);
@@ -709,7 +709,7 @@ export default function DiscoverPage() {
     }
 
     const query = searchQuery.toLowerCase();
-    const filtered = collectionItems.filter(item => 
+    const filtered = collectionItems.filter(item =>
       item.title.toLowerCase().includes(query) ||
       item.authors.some(author => author.toLowerCase().includes(query)) ||
       item.categories.some(cat => cat.toLowerCase().includes(query)) ||
@@ -777,20 +777,20 @@ export default function DiscoverPage() {
             const profile: UserProfile = {
               role: data.role || "",
               fullName: data.fullName || "",
-              interests: Array.isArray(data.interests) ? data.interests : 
-                        (typeof data.interests === 'string' ? [data.interests] : []),
+              interests: Array.isArray(data.interests) ? data.interests :
+                (typeof data.interests === 'string' ? [data.interests] : []),
               ageRange: data.ageRange,
               readingLevel: data.readingLevel
             };
-            
+
             setRole(profile.role);
             setUserProfile(profile);
-            
+
             // Load screen time settings and usage for children and students
             if (profile.role === "child" || profile.role === "student") {
               const settings = await loadScreenTimeSettings(u.uid);
               const usage = await loadTodayUsage(u.uid);
-              
+
               if (settings && usage) {
                 const status = calculateScreenTimeStatus(settings, usage);
                 setScreenTimeStatus(status);
@@ -845,7 +845,7 @@ export default function DiscoverPage() {
 
   async function toggleFavourite(item: Book | Video | ContentItem, type: 'book' | 'video') {
     if (!user) return alert('Please log in to favourite items.');
-    
+
     if (!canAccessContent(type)) {
       alert(getScreenTimeMessage() || 'Content access is restricted.');
       return;
@@ -869,10 +869,10 @@ export default function DiscoverPage() {
       setFavourites([...favourites, newFav]);
     }
   }
-  
+
   async function submitReview() {
     if (!user || !selectedItem) return;
-    
+
     const itemType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
     if (!canAccessContent(itemType)) {
       alert(getScreenTimeMessage() || 'Content access is restricted.');
@@ -904,7 +904,7 @@ export default function DiscoverPage() {
     const revs: Review[] = [];
     snap.forEach((doc) => revs.push({ id: doc.id, ...(doc.data() as any) } as Review));
     setReviewsMap((prev) => ({ ...prev, [itemId]: revs }));
-    
+
     const reviewIds = revs.map(r => r.id);
     if (reviewIds.length > 0) {
       await loadHeartsForReviews(reviewIds);
@@ -1003,7 +1003,7 @@ export default function DiscoverPage() {
       alert('This category is not in your selected interests. Ask a parent to update your interests.');
       return;
     }
-    
+
     setBucket(newBucket);
     setBooksPage(1);
   };
@@ -1021,14 +1021,14 @@ export default function DiscoverPage() {
       alert('This category is not in your selected interests. Ask a parent to update your interests.');
       return;
     }
-    
+
     setVideoBucket(newBucket);
     setVideosPage(1);
   };
 
   const handleContentItemClick = (item: Book | Video | ContentItem) => {
     const contentType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
-    
+
     if (!canAccessContent(contentType)) {
       alert(getScreenTimeMessage() || 'Content access is restricted.');
       return;
@@ -1167,17 +1167,16 @@ export default function DiscoverPage() {
       <div className="max-w-6xl mx-auto p-6 font-sans text-gray-900">
         {/* Screen Time Status Banner */}
         {screenTimeSettings?.enabled && screenTimeStatus !== 'within-limits' && (
-          <div className={`mb-4 p-4 rounded-xl border flex items-center gap-3 ${
-            screenTimeStatus === 'bedtime' 
+          <div className={`mb-4 p-4 rounded-xl border flex items-center gap-3 ${screenTimeStatus === 'bedtime'
               ? 'bg-purple-50 border-purple-200'
               : screenTimeStatus === 'limit-exceeded'
-              ? 'bg-red-50 border-red-200'
-              : 'bg-yellow-50 border-yellow-200'
-          }`}>
+                ? 'bg-red-50 border-red-200'
+                : 'bg-yellow-50 border-yellow-200'
+            }`}>
             {screenTimeStatus === 'bedtime' && <Clock className="w-5 h-5 text-purple-600" />}
             {screenTimeStatus === 'limit-exceeded' && <Shield className="w-5 h-5 text-red-600" />}
             {screenTimeStatus === 'approaching-limit' && <AlertCircle className="w-5 h-5 text-yellow-600" />}
-            
+
             <div className="flex-1">
               <h3 className="font-medium">
                 {screenTimeStatus === 'bedtime' && 'Bedtime Hours'}
@@ -1196,13 +1195,12 @@ export default function DiscoverPage() {
                   </div>
                 </div>
                 <div className="w-20 bg-gray-200 rounded-full h-2 mt-1">
-                  <div 
-                    className={`h-2 rounded-full transition-all ${
-                      screenTimeStatus === 'limit-exceeded' ? 'bg-red-500' :
-                      screenTimeStatus === 'approaching-limit' ? 'bg-yellow-500' : 'bg-green-500'
-                    }`}
-                    style={{ 
-                      width: `${Math.min(100, (currentUsage.totalMinutes / screenTimeSettings.dailyLimit) * 100)}%` 
+                  <div
+                    className={`h-2 rounded-full transition-all ${screenTimeStatus === 'limit-exceeded' ? 'bg-red-500' :
+                        screenTimeStatus === 'approaching-limit' ? 'bg-yellow-500' : 'bg-green-500'
+                      }`}
+                    style={{
+                      width: `${Math.min(100, (currentUsage.totalMinutes / screenTimeSettings.dailyLimit) * 100)}%`
                     }}
                   />
                 </div>
@@ -1220,9 +1218,9 @@ export default function DiscoverPage() {
                 <div className="bg-blue-50 border-blue-200">
                   <h3 className="font-medium text-blue-800">Your Personalized Content</h3>
                   <p className="text-sm text-blue-700">
-                    Showing content based on your interests: {userProfile?.interests?.map(interest => 
-                      bucketDisplayNames[interest as keyof typeof bucketDisplayNames] || 
-                      videoBucketDisplayNames[interest as keyof typeof videoBucketDisplayNames] || 
+                    Showing content based on your interests: {userProfile?.interests?.map(interest =>
+                      bucketDisplayNames[interest as keyof typeof bucketDisplayNames] ||
+                      videoBucketDisplayNames[interest as keyof typeof videoBucketDisplayNames] ||
                       interest
                     ).join(', ')}
                   </p>
@@ -1241,7 +1239,7 @@ export default function DiscoverPage() {
 
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-2xl font-bold">Discover Books & Videos for Kids</h1>
-          
+
           {user && (
             <button
               onClick={() => setShowActivityPanel(!showActivityPanel)}
@@ -1265,7 +1263,7 @@ export default function DiscoverPage() {
                 ×
               </button>
             </div>
-            
+
             {activities.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-64 overflow-y-auto">
                 {activities.slice(0, 12).map((activity) => (
@@ -1279,7 +1277,7 @@ export default function DiscoverPage() {
                       <div className="flex-1 min-w-0">
                         <h3 className="font-medium text-sm line-clamp-2">{activity.title}</h3>
                         <p className="text-xs text-gray-600 mt-1">
-                          {activity.type === 'book' 
+                          {activity.type === 'book'
                             ? activity.authors?.join(', ') || 'Unknown author'
                             : activity.channel
                           }
@@ -1339,9 +1337,8 @@ export default function DiscoverPage() {
           </button>
           <button
             onClick={() => handleModeChange('videos')}
-            className={`px-4 py-2 rounded-lg ${mode === 'videos' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} ${
-              !canAccessContent('video') ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
+            className={`px-4 py-2 rounded-lg ${mode === 'videos' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} ${!canAccessContent('video') ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
             disabled={!canAccessContent('video')}
           >
             Videos
@@ -1354,9 +1351,8 @@ export default function DiscoverPage() {
           </button>
           <button
             onClick={() => handleModeChange('collection-videos')}
-            className={`px-4 py-2 rounded-lg ${mode === 'collection-videos' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} ${
-              !canAccessContent('video') ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
+            className={`px-4 py-2 rounded-lg ${mode === 'collection-videos' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} ${!canAccessContent('video') ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
             disabled={!canAccessContent('video')}
           >
             Our Video Collection
@@ -1370,13 +1366,12 @@ export default function DiscoverPage() {
               <button
                 key={key}
                 onClick={() => handleVideoBucketChange(key)}
-                className={`px-3 py-1.5 rounded-full text-sm border transition-all ${
-                  videoBucket === key 
-                    ? 'bg-black text-white border-black' 
+                className={`px-3 py-1.5 rounded-full text-sm border transition-all ${videoBucket === key
+                    ? 'bg-black text-white border-black'
                     : shouldHighlightCategory(key)
-                    ? 'bg-blue-100 border-blue-300 text-blue-800 hover:bg-blue-200'
-                    : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
-                }`}
+                      ? 'bg-blue-100 border-blue-300 text-blue-800 hover:bg-blue-200'
+                      : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
+                  }`}
               >
                 {videoBucketDisplayNames[key]}
                 {shouldHighlightCategory(key) && (
@@ -1392,9 +1387,8 @@ export default function DiscoverPage() {
           <div className="flex flex-wrap gap-2 mb-6">
             <button
               onClick={() => handleBucketChange('')}
-              className={`px-3 py-1.5 rounded-full text-sm border ${
-                bucket === '' ? 'bg-black text-white border-black' : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
-              }`}
+              className={`px-3 py-1.5 rounded-full text-sm border ${bucket === '' ? 'bg-black text-white border-black' : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
+                }`}
             >
               All
             </button>
@@ -1402,13 +1396,12 @@ export default function DiscoverPage() {
               <button
                 key={key}
                 onClick={() => handleBucketChange(key)}
-                className={`px-3 py-1.5 rounded-full text-sm border transition-all ${
-                  bucket === key 
-                    ? 'bg-black text-white border-black' 
+                className={`px-3 py-1.5 rounded-full text-sm border transition-all ${bucket === key
+                    ? 'bg-black text-white border-black'
                     : shouldHighlightCategory(key)
-                    ? 'bg-blue-100 border-blue-300 text-blue-800 hover:bg-blue-200'
-                    : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
-                }`}
+                      ? 'bg-blue-100 border-blue-300 text-blue-800 hover:bg-blue-200'
+                      : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
+                  }`}
               >
                 {bucketDisplayNames[key as keyof typeof bucketDisplayNames]}
                 {shouldHighlightCategory(key) && (
@@ -1446,7 +1439,7 @@ export default function DiscoverPage() {
                         <Check className="w-3 h-3" />
                       </div>
                     )}
-                    
+
                     <img
                       src={book.thumbnail || FALLBACK_THUMB}
                       alt={book.title}
@@ -1469,17 +1462,16 @@ export default function DiscoverPage() {
                           ))}
                         </div>
                       )}
-                      
+
                       {/* Quick action buttons */}
                       {user && (
                         <div className="flex gap-1 mt-2" onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={() => markAsRead(book)}
-                            className={`text-xs px-2 py-1 rounded border ${
-                              hasActivity(book.id, 'book') 
-                                ? 'bg-green-100 text-green-700 border-green-300' 
+                            className={`text-xs px-2 py-1 rounded border ${hasActivity(book.id, 'book')
+                                ? 'bg-green-100 text-green-700 border-green-300'
                                 : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-green-50'
-                            }`}
+                              }`}
                           >
                             <BookOpen className="w-3 h-3 inline mr-1" />
                             {hasActivity(book.id, 'book') ? 'Read' : 'Mark as Read'}
@@ -1503,7 +1495,7 @@ export default function DiscoverPage() {
                         <Check className="w-3 h-3" />
                       </div>
                     )}
-                    
+
                     {video.thumbnail && (
                       <img
                         src={video.thumbnail}
@@ -1514,17 +1506,16 @@ export default function DiscoverPage() {
                     <div className="flex-1">
                       <h3 className="font-semibold text-sm line-clamp-2">{video.title}</h3>
                       {video.channel && <p className="text-xs text-gray-600 mt-1">{video.channel}</p>}
-                      
+
                       {/* Quick action buttons */}
                       {user && (
                         <div className="flex gap-1 mt-2" onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={() => markAsWatched(video)}
-                            className={`text-xs px-2 py-1 rounded border ${
-                              hasActivity(video.videoId, 'video') 
-                                ? 'bg-green-100 text-green-700 border-green-300' 
+                            className={`text-xs px-2 py-1 rounded border ${hasActivity(video.videoId, 'video')
+                                ? 'bg-green-100 text-green-700 border-green-300'
                                 : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-green-50'
-                            }`}
+                              }`}
                           >
                             <Play className="w-3 h-3 inline mr-1" />
                             {hasActivity(video.videoId, 'video') ? 'Watched' : 'Mark as Watched'}
@@ -1548,7 +1539,7 @@ export default function DiscoverPage() {
                         <Check className="w-3 h-3" />
                       </div>
                     )}
-                    
+
                     <img
                       src={contentItem.thumbnail || FALLBACK_THUMB}
                       alt={contentItem.title}
@@ -1571,17 +1562,16 @@ export default function DiscoverPage() {
                           ))}
                         </div>
                       )}
-                      
+
                       {/* Quick action buttons for collection books */}
                       {user && mode === 'collection-books' && (
                         <div className="flex gap-1 mt-2" onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={() => markAsRead(contentItem)}
-                            className={`text-xs px-2 py-1 rounded border ${
-                              hasActivity(contentItem.id, 'book') 
-                                ? 'bg-green-100 text-green-700 border-green-300' 
+                            className={`text-xs px-2 py-1 rounded border ${hasActivity(contentItem.id, 'book')
+                                ? 'bg-green-100 text-green-700 border-green-300'
                                 : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-green-50'
-                            }`}
+                              }`}
                           >
                             <BookOpen className="w-3 h-3 inline mr-1" />
                             {hasActivity(contentItem.id, 'book') ? 'Read' : 'Mark as Read'}
@@ -1621,12 +1611,12 @@ export default function DiscoverPage() {
         <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-50 text-gray-800 overflow-auto p-4">
           <div className="bg-white p-6 rounded-xl w-full max-w-[720px] relative max-h-[90vh] overflow-y-auto">
             {/* Close button */}
-            <button 
+            <button
               onClick={() => {
                 // Track session time when closing modal
                 trackContentSession((mode === 'books' || mode === 'collection-books') ? 'book' : 'video');
                 setSelectedItem(null);
-              }} 
+              }}
               className="sticky top-0 float-right text-xl font-bold bg-white"
             >
               ×
@@ -1654,25 +1644,25 @@ export default function DiscoverPage() {
                     {isContentItem(selectedItem) && selectedItem.categories?.length ? (
                       <p className="text-[11px] text-gray-500 mt-1">{selectedItem.categories.join(', ')}</p>
                     ) : null}
-                    
+
                     {/* Activity status in modal */}
-                    {((isBook(selectedItem) && hasActivity(selectedItem.id, 'book')) || 
+                    {((isBook(selectedItem) && hasActivity(selectedItem.id, 'book')) ||
                       (isContentItem(selectedItem) && hasActivity(selectedItem.id, 'book'))) && (
-                      <div className="mt-2 inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
-                        <Check className="w-3 h-3" />
-                        Read
-                      </div>
-                    )}
+                        <div className="mt-2 inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
+                          <Check className="w-3 h-3" />
+                          Read
+                        </div>
+                      )}
                   </div>
                 </div>
 
                 {/* Description */}
                 <p className="text-sm text-[#444] leading-6 mb-3">
-                  {isBook(selectedItem) 
+                  {isBook(selectedItem)
                     ? (selectedItem.snippet ?? selectedItem.synopsis ?? 'No description available.')
-                    : isContentItem(selectedItem) 
-                    ? (selectedItem.synopsis || 'No description available.')
-                    : 'No description available.'}
+                    : isContentItem(selectedItem)
+                      ? (selectedItem.synopsis || 'No description available.')
+                      : 'No description available.'}
                 </p>
 
                 {/* NEW: Screen time warning for books */}
@@ -1700,7 +1690,7 @@ export default function DiscoverPage() {
                     >
                       {showPreview ? 'Hide preview' : 'Read sample'}
                       <svg className={`w-4 h-4 transition-transform ${showPreview ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/>
+                        <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" />
                       </svg>
                     </button>
 
@@ -1738,7 +1728,7 @@ export default function DiscoverPage() {
                     >
                       {showPreview ? 'Hide preview' : 'Read sample'}
                       <svg className={`w-4 h-4 transition-transform ${showPreview ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/>
+                        <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" />
                       </svg>
                     </button>
 
@@ -1776,8 +1766,8 @@ export default function DiscoverPage() {
                   >
                     View on Google Books
                     <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M12.293 2.293a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L14 5.414V14a1 1 0 11-2 0V5.414L9.707 7.707A1 1 0 118.293 6.293l4-4z"/>
-                      <path d="M3 9a1 1 0 011-1h4a1 1 0 110 2H5v6h10v-3a1 1 0 112 0v4a1 1 0 01-1 1H4a1 1 0 01-1-1V9z"/>
+                      <path d="M12.293 2.293a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L14 5.414V14a1 1 0 11-2 0V5.414L9.707 7.707A1 1 0 118.293 6.293l4-4z" />
+                      <path d="M3 9a1 1 0 011-1h4a1 1 0 110 2H5v6h10v-3a1 1 0 112 0v4a1 1 0 01-1 1H4a1 1 0 01-1-1V9z" />
                     </svg>
                   </a>
                 )}
@@ -1797,8 +1787,8 @@ export default function DiscoverPage() {
                   >
                     View External Link
                     <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M12.293 2.293a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L14 5.414V14a1 1 0 11-2 0V5.414L9.707 7.707A1 1 0 118.293 6.293l4-4z"/>
-                      <path d="M3 9a1 1 0 011-1h4a1 1 0 110 2H5v6h10v-3a1 1 0 112 0v4a1 1 0 01-1 1H4a1 1 0 01-1-1V9z"/>
+                      <path d="M12.293 2.293a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L14 5.414V14a1 1 0 11-2 0V5.414L9.707 7.707A1 1 0 118.293 6.293l4-4z" />
+                      <path d="M3 9a1 1 0 011-1h4a1 1 0 110 2H5v6h10v-3a1 1 0 112 0v4a1 1 0 01-1 1H4a1 1 0 01-1-1V9z" />
                     </svg>
                   </a>
                 )}
@@ -1840,10 +1830,10 @@ export default function DiscoverPage() {
                             Video time today: {formatMinutes(currentUsage.videoMinutes)} / {formatMinutes(screenTimeSettings.videoLimit)}
                           </span>
                           <div className="w-20 bg-blue-200 rounded-full h-2">
-                            <div 
+                            <div
                               className="h-2 bg-blue-600 rounded-full transition-all"
-                              style={{ 
-                                width: `${Math.min(100, (currentUsage.videoMinutes / screenTimeSettings.videoLimit) * 100)}%` 
+                              style={{
+                                width: `${Math.min(100, (currentUsage.videoMinutes / screenTimeSettings.videoLimit) * 100)}%`
                               }}
                             />
                           </div>
@@ -1861,7 +1851,7 @@ export default function DiscoverPage() {
                     {selectedItem.publishedAt && (
                       <span className="ml-2 text-gray-500">• {fmtDate(selectedItem.publishedAt)}</span>
                     )}
-                    
+
                     {hasActivity(selectedItem.videoId, 'video') && (
                       <div className="ml-2 inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
                         <Check className="w-3 h-3" />
@@ -1905,58 +1895,55 @@ export default function DiscoverPage() {
                 <>
                   {isBook(selectedItem) && (
                     <button
-                      onClick={() => hasActivity(selectedItem.id, 'book') 
+                      onClick={() => hasActivity(selectedItem.id, 'book')
                         ? removeActivity(selectedItem.id, 'book')
                         : markAsRead(selectedItem)
                       }
-                      className={`px-3 py-2 rounded-lg border flex items-center gap-2 ${
-                        hasActivity(selectedItem.id, 'book')
+                      className={`px-3 py-2 rounded-lg border flex items-center gap-2 ${hasActivity(selectedItem.id, 'book')
                           ? 'bg-green-100 text-green-700 border-green-300'
                           : 'border-gray-300 hover:bg-green-50'
-                      } ${!canAccessContent('book') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        } ${!canAccessContent('book') ? 'opacity-50 cursor-not-allowed' : ''}`}
                       disabled={!canAccessContent('book')}
                     >
                       <BookOpen className="w-4 h-4" />
                       {hasActivity(selectedItem.id, 'book') ? 'Mark as Unread' : 'Mark as Read'}
                     </button>
                   )}
-                  
+
                   {isContentItem(selectedItem) && mode === 'collection-books' && (
                     <button
-                      onClick={() => hasActivity(selectedItem.id, 'book') 
+                      onClick={() => hasActivity(selectedItem.id, 'book')
                         ? removeActivity(selectedItem.id, 'book')
                         : markAsRead(selectedItem)
                       }
-                      className={`px-3 py-2 rounded-lg border flex items-center gap-2 ${
-                        hasActivity(selectedItem.id, 'book')
+                      className={`px-3 py-2 rounded-lg border flex items-center gap-2 ${hasActivity(selectedItem.id, 'book')
                           ? 'bg-green-100 text-green-700 border-green-300'
                           : 'border-gray-300 hover:bg-green-50'
-                      } ${!canAccessContent('book') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        } ${!canAccessContent('book') ? 'opacity-50 cursor-not-allowed' : ''}`}
                       disabled={!canAccessContent('book')}
                     >
                       <BookOpen className="w-4 h-4" />
                       {hasActivity(selectedItem.id, 'book') ? 'Mark as Unread' : 'Mark as Read'}
                     </button>
                   )}
-                  
+
                   {isVideo(selectedItem) && (
                     <button
                       onClick={() => hasActivity(selectedItem.videoId, 'video')
                         ? removeActivity(selectedItem.videoId, 'video')
                         : markAsWatched(selectedItem)
                       }
-                      className={`px-3 py-2 rounded-lg border flex items-center gap-2 ${
-                        hasActivity(selectedItem.videoId, 'video')
+                      className={`px-3 py-2 rounded-lg border flex items-center gap-2 ${hasActivity(selectedItem.videoId, 'video')
                           ? 'bg-green-100 text-green-700 border-green-300'
                           : 'border-gray-300 hover:bg-green-50'
-                      } ${!canAccessContent('video') ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        } ${!canAccessContent('video') ? 'opacity-50 cursor-not-allowed' : ''}`}
                       disabled={!canAccessContent('video')}
                     >
                       <Play className="w-4 h-4" />
                       {hasActivity(selectedItem.videoId, 'video') ? 'Mark as Unwatched' : 'Mark as Watched'}
                     </button>
                   )}
-                  
+
                   <button
                     onClick={() => toggleFavourite(selectedItem, (mode === 'books' || mode === 'collection-books') ? 'book' : 'video')}
                     className={`px-3 py-1 rounded-lg border ${!canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -1966,8 +1953,8 @@ export default function DiscoverPage() {
                       ? '★ Remove Favourite'
                       : '☆ Add Favourite'}
                   </button>
-                  <button 
-                    onClick={handleLeaveReview} 
+                  <button
+                    onClick={handleLeaveReview}
                     className={`px-3 py-1 rounded-lg border text-green-600 ${!canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') ? 'opacity-50 cursor-not-allowed' : ''}`}
                     disabled={!canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video')}
                   >
@@ -1987,91 +1974,90 @@ export default function DiscoverPage() {
               <h3 className="font-semibold mb-1">Comments</h3>
 
               {reviewsMap[getItemId(selectedItem)]?.length ? (
-              reviewsMap[getItemId(selectedItem)].map((r) => (
-                <div key={r.id} className="border border-[#eee] p-3 rounded-lg mb-2 text-sm">
-                  <div className="flex justify-between items-start mb-2">
-                    <strong>{r.userName}</strong>
-                    <div className="flex items-center gap-2">
-                      {/* Heart button */}
-                      {user && user.uid !== r.userId && canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') && (
-                        <button
-                          onClick={() => toggleReviewHeart(r.id, r.userId)}
-                          className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs transition-colors ${
-                            hasUserHearted(r.id)
-                              ? 'bg-red-100 text-red-600 hover:bg-red-200'
-                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                          }`}
-                          title={hasUserHearted(r.id) ? 'Remove heart' : 'Heart this comment'}
-                        >
-                          {hasUserHearted(r.id) ? '❤️' : '🤍'}
-                          <span>{getHeartCount(r.id)}</span>
-                        </button>
-                      )}
-                      
-                      {/* Show heart count even if user can't heart */}
-                      {(!user || user.uid === r.userId || !canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video')) && getHeartCount(r.id) > 0 && (
-                        <div className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600">
-                          ❤️
-                          <span>{getHeartCount(r.id)}</span>
-                        </div>
-                      )}
-                      
-                      {user && (
-                        <button
-                          onClick={() => reportReview(r.id)}
-                          className="text-xs text-red-500 hover:text-red-700"
-                        >
-                          Report
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <p className="text-gray-700">{r.content}</p>
-                  
-                  {/* Show who hearted this comment (optional) */}
-                  {getHeartCount(r.id) > 0 && (
-                    <div className="mt-2 pt-2 border-t border-gray-100">
-                      <p className="text-xs text-gray-500">
-                        {getHeartCount(r.id) === 1 
-                          ? `${reviewHearts[r.id]?.[0]?.userName || 'Someone'} hearted this`
-                          : `${getHeartCount(r.id)} people hearted this`
-                        }
-                      </p>
-                    </div>
-                  )}
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-gray-500">No comment yet.</p>
-            )}
+                reviewsMap[getItemId(selectedItem)].map((r) => (
+                  <div key={r.id} className="border border-[#eee] p-3 rounded-lg mb-2 text-sm">
+                    <div className="flex justify-between items-start mb-2">
+                      <strong>{r.userName}</strong>
+                      <div className="flex items-center gap-2">
+                        {/* Heart button */}
+                        {user && user.uid !== r.userId && canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') && (
+                          <button
+                            onClick={() => toggleReviewHeart(r.id, r.userId)}
+                            className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs transition-colors ${hasUserHearted(r.id)
+                                ? 'bg-red-100 text-red-600 hover:bg-red-200'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                              }`}
+                            title={hasUserHearted(r.id) ? 'Remove heart' : 'Heart this comment'}
+                          >
+                            {hasUserHearted(r.id) ? '❤️' : '🤍'}
+                            <span>{getHeartCount(r.id)}</span>
+                          </button>
+                        )}
 
-            {user && canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') ? (
-              <div className="mt-2">
-                <textarea
-                  ref={reviewRef}
-                  value={reviewContent}
-                  onChange={(e) => setReviewContent(e.target.value)}
-                  placeholder="Write a review…"
-                  className="w-full border rounded-lg p-2 text-sm"
-                />
-                <button
-                  onClick={submitReview}
-                  className="mt-1 px-3 py-1 bg-[#111] text-white rounded-lg"
-                >
-                  Submit
-                </button>
-              </div>
-            ) : !user ? (
-              <p className="text-xs text-gray-500 mt-2">
-                <Link href="/login" className="text-gray-700 hover:text-pink-500">Login</Link> to leave a review.
-              </p>
-            ) : (
-              <p className="text-xs text-gray-500 mt-2">
-                Content access restricted - cannot leave comment.
-              </p>
-            )}
-          </div>
+                        {/* Show heart count even if user can't heart */}
+                        {(!user || user.uid === r.userId || !canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video')) && getHeartCount(r.id) > 0 && (
+                          <div className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600">
+                            ❤️
+                            <span>{getHeartCount(r.id)}</span>
+                          </div>
+                        )}
+
+                        {user && (
+                          <button
+                            onClick={() => reportReview(r.id)}
+                            className="text-xs text-red-500 hover:text-red-700"
+                          >
+                            Report
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <p className="text-gray-700">{r.content}</p>
+
+                    {/* Show who hearted this comment (optional) */}
+                    {getHeartCount(r.id) > 0 && (
+                      <div className="mt-2 pt-2 border-t border-gray-100">
+                        <p className="text-xs text-gray-500">
+                          {getHeartCount(r.id) === 1
+                            ? `${reviewHearts[r.id]?.[0]?.userName || 'Someone'} hearted this`
+                            : `${getHeartCount(r.id)} people hearted this`
+                          }
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-gray-500">No comment yet.</p>
+              )}
+
+              {user && canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') ? (
+                <div className="mt-2">
+                  <textarea
+                    ref={reviewRef}
+                    value={reviewContent}
+                    onChange={(e) => setReviewContent(e.target.value)}
+                    placeholder="Write a review…"
+                    className="w-full border rounded-lg p-2 text-sm"
+                  />
+                  <button
+                    onClick={submitReview}
+                    className="mt-1 px-3 py-1 bg-[#111] text-white rounded-lg"
+                  >
+                    Submit
+                  </button>
+                </div>
+              ) : !user ? (
+                <p className="text-xs text-gray-500 mt-2">
+                  <Link href="/login" className="text-gray-700 hover:text-pink-500">Login</Link> to leave a review.
+                </p>
+              ) : (
+                <p className="text-xs text-gray-500 mt-2">
+                  Content access restricted - cannot leave comment.
+                </p>
+              )}
+            </div>
           </div>
         </div>
       )}
