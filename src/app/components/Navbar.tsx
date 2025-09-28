@@ -178,7 +178,9 @@ export default function Navbar() {
                                 Educator Dashboard
                               </Link>
                             )}
-                            {(role === "admin" || role === "parent" || role === "educator") && (
+                            
+                            {(role === "admin" || role === "parent" || role === "child" || role === "educator" || role === "student") && (
+                              <>
                               <Link
                                 href="/editprofile"
                                 className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
@@ -186,9 +188,6 @@ export default function Navbar() {
                               >
                                 Edit Profile
                               </Link>
-                            )}
-                            {(role === "admin" || role === "parent" || role === "child" || role === "educator" || role === "student") && (
-                              <>
                                 <Link
                                   href="/payment_history"
                                   className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
@@ -298,13 +297,12 @@ export default function Navbar() {
                         Educator Dashboard
                       </NavLink>
                     )}
-                    {(role === "admin" || role === "parent" || role === "educator") && (
+
+                    {(role === "admin" || role === "parent" || role === "child" || role === "educator" || role === "student") && (
+                      <>
                       <NavLink href="/editprofile" onClick={closeMobileMenu}>
                         Edit Profile
                       </NavLink>
-                    )}
-                    {(role === "admin" || role === "parent" || role === "child" || role === "educator" || role === "student") && (
-                      <>
                         <NavLink href="/payment_history" onClick={closeMobileMenu}>
                           Payment History
                         </NavLink>

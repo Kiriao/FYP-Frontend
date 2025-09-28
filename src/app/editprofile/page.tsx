@@ -20,9 +20,39 @@ interface Child {
   email: string;
   restrictions: string[];
   ageRange?: string;
-  interests?: string;
+  interests?: string[];  // Changed to array
   readingLevel?: string;
 }
+
+// Interest categories from your DiscoverPage
+const bookInterestCategories = {
+  juvenile_fiction: 'Fiction',
+  juvenile_nonfiction: 'Nonfiction',
+  education: 'Education',
+  literature: "Children's Literature",
+  early_readers: 'Picture/Board/Early',
+  middle_grade: 'Middle Grade',
+  poetry_humor: 'Poetry & Humor',
+  biography: 'Biography',
+  juvenile_other: 'Other (Kids)',
+  young_adult: 'Young Adult',
+};
+
+const videoInterestCategories = {
+  stories: 'Stories',
+  songs: 'Songs & Rhymes',
+  learning: 'Learning',
+  science: 'Science',
+  math: 'Math',
+  animals: 'Animals',
+  artcraft: 'Art & Crafts',
+};
+
+// Combine all interests for child selection
+const allInterestCategories = {
+  ...bookInterestCategories,
+  ...videoInterestCategories,
+};
 
 export default function EditProfilePage() {
   const [user, setUser] = useState<User | null>(null);
@@ -53,9 +83,9 @@ export default function EditProfilePage() {
   const [childNewPassword, setChildNewPassword] = useState("");
   const [showChildNewPassword, setShowChildNewPassword] = useState(false);
 
-  // Child Preferences
+  // Child Preferences - Updated for multiple interests
   const [childAgeRange, setChildAgeRange] = useState("");
-  const [childInterests, setChildInterests] = useState("");
+  const [childInterests, setChildInterests] = useState<string[]>([]); // Changed to array
   const [childReadingLevel, setChildReadingLevel] = useState("");
 
   // Loading states
@@ -102,7 +132,8 @@ export default function EditProfilePage() {
                 email: docData.email || "",
                 restrictions: docData.restrictions || [],
                 ageRange: docData.ageRange || "",
-                interests: docData.interests || "",
+                interests: Array.isArray(docData.interests) ? docData.interests : 
+                          (typeof docData.interests === 'string' ? [docData.interests] : []), // Handle both formats
                 readingLevel: docData.readingLevel || "",
               };
             });
@@ -115,7 +146,7 @@ export default function EditProfilePage() {
               setChildFullName(firstChild.fullName);
               setChildRestrictions(firstChild.restrictions.join(", "));
               setChildAgeRange(firstChild.ageRange || "");
-              setChildInterests(firstChild.interests || "");
+              setChildInterests(firstChild.interests || []);
               setChildReadingLevel(firstChild.readingLevel || "");
             }
           }
@@ -133,85 +164,83 @@ export default function EditProfilePage() {
   // -----------------------
   // Avatar upload with Cloudinary
   // -----------------------
-  // Replace your handleAvatarUpload function with this improved TypeScript version
-
-const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-  if (!user || !e.target.files?.[0]) return;
-  
-  const file = e.target.files[0];
-  
-  // Validate file type
-  if (!file.type.startsWith('image/')) {
-    alert('Please select a valid image file.');
-    return;
-  }
-  
-  // Validate file size (5MB limit)
-  if (file.size > 5 * 1024 * 1024) {
-    alert('Please select an image smaller than 5MB.');
-    return;
-  }
-  
-  setUploading(true);
-
-  try {
-    const reader = new FileReader();
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!user || !e.target.files?.[0]) return;
     
-    reader.onloadend = async () => {
-      try {
-        const base64 = reader.result as string;
-        
-        const response = await fetch('/api/upload-avatar', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            image: base64,
-            userId: user.uid
-          })
-        });
+    const file = e.target.files[0];
+    
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      alert('Please select a valid image file.');
+      return;
+    }
+    
+    // Validate file size (5MB limit)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Please select an image smaller than 5MB.');
+      return;
+    }
+    
+    setUploading(true);
 
-        // Check if response is ok
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
+    try {
+      const reader = new FileReader();
+      
+      reader.onloadend = async () => {
+        try {
+          const base64 = reader.result as string;
+          
+          const response = await fetch('/api/upload-avatar', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              image: base64,
+              userId: user.uid
+            })
+          });
 
-        const data: { url?: string; error?: string } = await response.json();
-        
-        if (data.url) {
-          // Update Firestore and Firebase Auth
-          await updateDoc(doc(db, "users", user.uid), { avatar: data.url });
-          await updateProfile(user, { photoURL: data.url });
-          setAvatar(data.url);
-          alert("Avatar updated successfully!");
-        } else {
-          throw new Error(data.error || 'Upload failed');
+          // Check if response is ok
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const data: { url?: string; error?: string } = await response.json();
+          
+          if (data.url) {
+            // Update Firestore and Firebase Auth
+            await updateDoc(doc(db, "users", user.uid), { avatar: data.url });
+            await updateProfile(user, { photoURL: data.url });
+            setAvatar(data.url);
+            alert("Avatar updated successfully!");
+          } else {
+            throw new Error(data.error || 'Upload failed');
+          }
+          
+        } catch (err) {
+          console.error('Upload error:', err);
+          const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+          alert(`Failed to upload avatar: ${errorMessage}`);
+        } finally {
+          setUploading(false);
         }
-        
-      } catch (err) {
-        console.error('Upload error:', err);
-        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-        alert(`Failed to upload avatar: ${errorMessage}`);
-      } finally {
+      };
+      
+      reader.onerror = () => {
+        console.error('FileReader error');
+        alert('Failed to read the selected file.');
         setUploading(false);
-      }
-    };
-    
-    reader.onerror = () => {
-      console.error('FileReader error');
-      alert('Failed to read the selected file.');
+      };
+      
+      reader.readAsDataURL(file);
+      
+    } catch (err) {
+      console.error('File processing error:', err);
+      alert('Failed to process the selected file.');
       setUploading(false);
-    };
-    
-    reader.readAsDataURL(file);
-    
-  } catch (err) {
-    console.error('File processing error:', err);
-    alert('Failed to process the selected file.');
-    setUploading(false);
-  }
-};
+    }
+  };
 
   // -----------------------
   // Update parent profile
@@ -310,6 +339,19 @@ const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
   };
 
   // -----------------------
+  // Handle interest selection for child
+  // -----------------------
+  const handleInterestToggle = (interest: string) => {
+    setChildInterests(prev => {
+      if (prev.includes(interest)) {
+        return prev.filter(i => i !== interest);
+      } else {
+        return [...prev, interest];
+      }
+    });
+  };
+
+  // -----------------------
   // Update child profile
   // -----------------------
   const handleUpdateChild = async (e: React.FormEvent) => {
@@ -322,7 +364,7 @@ const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         fullName: childFullName,
         restrictions: restrictionsArray,
         ageRange: childAgeRange,
-        interests: childInterests,
+        interests: childInterests, // Save as array
         readingLevel: childReadingLevel,
       });
 
@@ -398,8 +440,8 @@ const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
             Security
           </button>
 
-          {/* Only show Manage Child if NOT admin */}
-          {role && role.toLowerCase() !== "admin" && (
+          {/* Only show Manage Child if NOT admin and NOT child */}
+          {role && role.toLowerCase() !== "admin" && role.toLowerCase() !== "child" && (
             <button
               className={`block w-full text-left py-2 px-3 rounded-md font-semibold ${
                 activeTab === "child" ? "bg-pink-100 text-pink-600" : "text-gray-600"
@@ -426,7 +468,7 @@ const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
                   setChildFullName(child?.fullName || "");
                   setChildRestrictions(child?.restrictions?.join(", ") || "");
                   setChildAgeRange(child?.ageRange || "");
-                  setChildInterests(child?.interests || "");
+                  setChildInterests(child?.interests || []);
                   setChildReadingLevel(child?.readingLevel || "");
                 }}
                 className="w-full px-4 py-2 border border-gray-300 rounded-md mb-4 text-gray-900"
@@ -468,14 +510,26 @@ const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
                     <option value="11-12">11–12</option>
                   </select>
 
+                  {/* Updated Interests Section */}
                   <label className="text-sm font-medium text-gray-700">Interests</label>
-                  <input
-                    type="text"
-                    value={childInterests}
-                    onChange={e => setChildInterests(e.target.value)}
-                    placeholder="e.g. Fantasy, Science, History"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900"
-                  />
+                  <div className="border border-gray-300 rounded-md p-3 max-h-40 overflow-y-auto">
+                    <div className="grid grid-cols-2 gap-2">
+                      {Object.entries(allInterestCategories).map(([key, label]) => (
+                        <label key={key} className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={childInterests.includes(key)}
+                            onChange={() => handleInterestToggle(key)}
+                            className="rounded border-gray-300 text-pink-600 focus:ring-pink-500"
+                          />
+                          <span className="text-sm text-gray-700">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    {childInterests.length === 0 && (
+                      <p className="text-xs text-gray-500 mt-2">Select at least one interest category</p>
+                    )}
+                  </div>
 
                   <label className="text-sm font-medium text-gray-700">Reading Level</label>
                   <select
@@ -535,7 +589,7 @@ const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
               {/* Avatar */}
               <div className="flex flex-col items-center">
                 <img
-                  src={avatar || "./default-avatar.jpg"}
+                  src={avatar || "/default-avatar.jpg"}
                   alt="avatar"
                   className="w-24 h-24 rounded-full object-cover text-gray-900 border mb-3"
                 />

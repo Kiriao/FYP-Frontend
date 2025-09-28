@@ -1,4 +1,3 @@
-// app/components/DiscoverPage.tsx
 'use client';
 
 import { getDoc } from "firebase/firestore";
@@ -63,9 +62,8 @@ interface Review {
   type: 'book' | 'video';
   title: string;
   createdAt: Timestamp;
-  heartCount?: number; // Add heart count to review
-  userHasHearted?: boolean; // Track if current user hearted this review
-
+  heartCount?: number;
+  userHasHearted?: boolean;
 }
 
 interface ContentItem {
@@ -92,7 +90,7 @@ interface Activity {
   channel?: string;
 }
 
-// NEW: Screen Time Types
+// Screen Time Types
 interface ScreenTimeSettings {
   dailyLimit: number;
   videoLimit: number;
@@ -119,6 +117,14 @@ interface ReviewHeart {
   createdAt: Timestamp;
 }
 
+// NEW: User profile interface
+interface UserProfile {
+  role: string;
+  fullName: string;
+  interests?: string[]; // Array of interest keys
+  ageRange?: string;
+  readingLevel?: string;
+}
 
 type ScreenTimeStatus = 'within-limits' | 'approaching-limit' | 'limit-exceeded' | 'bedtime' | 'disabled';
 
@@ -152,11 +158,14 @@ const videoBucketDisplayNames = {
 } as const;
 
 export default function DiscoverPage() {
-  // State (keeping existing state and adding new screen time state)
+  // State (keeping existing state and adding new user profile state)
   const [mode, setMode] = useState<'books' | 'videos' | 'collection-books' | 'collection-videos'>('books');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [role, setRole] = useState<string>("");
+
+  // NEW: User profile state
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
   // Books state
   const [books, setBooks] = useState<Book[]>([]);
@@ -194,7 +203,7 @@ export default function DiscoverPage() {
   const [showPreview, setShowPreview] = useState(false);
   useEffect(() => { setShowPreview(false); }, [selectedItem]);
 
-  // NEW: Screen Time State
+  // Screen Time State
   const [screenTimeSettings, setScreenTimeSettings] = useState<ScreenTimeSettings | null>(null);
   const [currentUsage, setCurrentUsage] = useState<UsageData | null>(null);
   const [screenTimeStatus, setScreenTimeStatus] = useState<ScreenTimeStatus>('within-limits');
@@ -204,31 +213,97 @@ export default function DiscoverPage() {
   // Heart Comments
   const [reviewHearts, setReviewHearts] = useState<Record<string, ReviewHeart[]>>({});
 
-  async function loadHeartsForReviews(reviewIds: string[]) {
-  if (!user || reviewIds.length === 0) return;
+  // NEW: Helper functions for interest filtering
+  const getUserInterestCategories = (): string[] => {
+    if (!userProfile || !userProfile.interests || userProfile.interests.length === 0) {
+      // Return all categories if no interests set
+      return [...Object.keys(bucketDisplayNames), ...Object.keys(videoBucketDisplayNames)];
+    }
+    return userProfile.interests;
+  };
 
-  try {
-    const heartsMap: Record<string, ReviewHeart[]> = {};
-    
-    // Load hearts for each review
-    for (const reviewId of reviewIds) {
-      const heartsRef = collection(db, 'review-hearts');
-      const q = query(heartsRef, where('reviewId', '==', reviewId));
-      const snap = await getDocs(q);
-      
-      const hearts: ReviewHeart[] = [];
-      snap.forEach((doc) => {
-        hearts.push({ id: doc.id, ...doc.data() } as ReviewHeart);
-      });
-      
-      heartsMap[reviewId] = hearts;
+  const isChildOrStudentRole = (): boolean => {
+    return userProfile?.role === 'child' || userProfile?.role === 'student';
+  };
+
+  const hasSelectedInterests = (): boolean => {
+  return Boolean(userProfile?.interests && userProfile.interests.length > 0);
+};
+
+  const shouldHighlightCategory = (categoryKey: string): boolean => {
+    if (!isChildOrStudentRole() || !hasSelectedInterests()) return false;
+    return getUserInterestCategories().includes(categoryKey);
+  };
+
+  const getAvailableBuckets = (): string[] => {
+    if (!isChildOrStudentRole() || !hasSelectedInterests()) {
+      // Show all buckets for non-child/student users or when no interests selected
+      return Object.keys(bucketDisplayNames);
     }
     
-    setReviewHearts(heartsMap);
-  } catch (error) {
-    console.error('Failed to load review hearts:', error);
+    const userInterests = getUserInterestCategories();
+    return Object.keys(bucketDisplayNames).filter(bucketKey => 
+      userInterests.includes(bucketKey)
+    );
+  };
+
+  const getAvailableVideoBuckets = (): (keyof typeof videoBucketDisplayNames)[] => {
+    if (!isChildOrStudentRole() || !hasSelectedInterests()) {
+      // Show all video buckets for non-child/student users or when no interests selected
+      return Object.keys(videoBucketDisplayNames) as (keyof typeof videoBucketDisplayNames)[];
+    }
+    
+    const userInterests = getUserInterestCategories();
+    return (Object.keys(videoBucketDisplayNames) as (keyof typeof videoBucketDisplayNames)[])
+      .filter(bucketKey => userInterests.includes(bucketKey));
+  };
+
+  // Set default bucket based on user interests
+  useEffect(() => {
+    if (userProfile && isChildOrStudentRole() && hasSelectedInterests()) {
+      const availableBuckets = getAvailableBuckets();
+      const availableVideoBuckets = getAvailableVideoBuckets();
+      
+      // Set default book bucket to first available interest
+      if (availableBuckets.length > 0 && !availableBuckets.includes(bucket)) {
+        setBucket(availableBuckets[0]);
+      }
+      
+      // Set default video bucket to first available interest
+      if (availableVideoBuckets.length > 0 && !availableVideoBuckets.includes(videoBucket)) {
+        setVideoBucket(availableVideoBuckets[0]);
+      }
+    } else if (userProfile && isChildOrStudentRole() && !hasSelectedInterests()) {
+      // If child/student has no interests selected, default to "All" (empty bucket)
+      setBucket('');
+      setVideoBucket('stories'); // Default first video category
+    }
+  }, [userProfile]);
+
+  async function loadHeartsForReviews(reviewIds: string[]) {
+    if (!user || reviewIds.length === 0) return;
+
+    try {
+      const heartsMap: Record<string, ReviewHeart[]> = {};
+      
+      for (const reviewId of reviewIds) {
+        const heartsRef = collection(db, 'review-hearts');
+        const q = query(heartsRef, where('reviewId', '==', reviewId));
+        const snap = await getDocs(q);
+        
+        const hearts: ReviewHeart[] = [];
+        snap.forEach((doc) => {
+          hearts.push({ id: doc.id, ...doc.data() } as ReviewHeart);
+        });
+        
+        heartsMap[reviewId] = hearts;
+      }
+      
+      setReviewHearts(heartsMap);
+    } catch (error) {
+      console.error('Failed to load review hearts:', error);
+    }
   }
-}
 
   // Type guards & helpers (keeping existing ones)
   const isBook = (item: Book | Video | ContentItem): item is Book => 
@@ -244,7 +319,7 @@ export default function DiscoverPage() {
     return '';
   };
 
-  // NEW: Screen Time Helper Functions
+  // Screen Time Helper Functions (keeping existing ones)
   const parseTime = (timeString: string): number => {
     const [hours, minutes] = timeString.split(':').map(Number);
     return hours * 60 + minutes;
@@ -257,10 +332,8 @@ export default function DiscoverPage() {
     const bedtimeEnd = parseTime(settings.bedtimeEnd);
 
     if (bedtimeStart > bedtimeEnd) {
-      // Overnight bedtime (e.g., 22:00 to 07:00)
       return currentTime >= bedtimeStart || currentTime <= bedtimeEnd;
     } else {
-      // Same day bedtime (e.g., 14:00 to 16:00)
       return currentTime >= bedtimeStart && currentTime <= bedtimeEnd;
     }
   };
@@ -288,7 +361,6 @@ export default function DiscoverPage() {
     if (screenTimeStatus === 'bedtime') return false;
     if (screenTimeStatus === 'limit-exceeded') return false;
     
-    // Check specific content type limits
     if (contentType === 'video' && currentUsage) {
       return currentUsage.videoMinutes < screenTimeSettings.videoLimit;
     }
@@ -311,67 +383,62 @@ export default function DiscoverPage() {
     }
   };
 
+  // Keep all existing functions (toggleReviewHeart, hasUserHearted, getHeartCount, formatMinutes, etc.)
   async function toggleReviewHeart(reviewId: string, reviewUserId: string) {
-  if (!user) return alert('Please log in to heart comments.');
-  if (user.uid === reviewUserId) return alert('You cannot heart your own comment.');
-  
-  // Check screen time restrictions
-  const itemType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
-  if (!canAccessContent(itemType)) {
-    alert(getScreenTimeMessage() || 'Content access is restricted.');
-    return;
-  }
-
-  try {
-    const heartsRef = collection(db, 'review-hearts');
-    const q = query(heartsRef, 
-      where('reviewId', '==', reviewId),
-      where('userId', '==', user.uid)
-    );
-    const existingHearts = await getDocs(q);
+    if (!user) return alert('Please log in to heart comments.');
+    if (user.uid === reviewUserId) return alert('You cannot heart your own comment.');
     
-    if (!existingHearts.empty) {
-      // Remove heart
-      const heartDoc = existingHearts.docs[0];
-      await deleteDoc(heartDoc.ref);
-      
-      // Update local state
-      setReviewHearts(prev => ({
-        ...prev,
-        [reviewId]: prev[reviewId]?.filter(heart => heart.userId !== user.uid) || []
-      }));
-    } else {
-      // Add heart
-      const newHeart: Omit<ReviewHeart, 'id'> = {
-        reviewId,
-        userId: user.uid,
-        userName: user.displayName || 'Anonymous',
-        createdAt: Timestamp.now()
-      };
-      
-      const heartDocRef = await addDoc(heartsRef, newHeart);
-      
-      // Update local state
-      setReviewHearts(prev => ({
-        ...prev,
-        [reviewId]: [...(prev[reviewId] || []), { id: heartDocRef.id, ...newHeart }]
-      }));
+    const itemType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
+    if (!canAccessContent(itemType)) {
+      alert(getScreenTimeMessage() || 'Content access is restricted.');
+      return;
     }
-  } catch (error) {
-    console.error('Failed to toggle heart:', error);
-    alert('Failed to update heart. Please try again.');
+
+    try {
+      const heartsRef = collection(db, 'review-hearts');
+      const q = query(heartsRef, 
+        where('reviewId', '==', reviewId),
+        where('userId', '==', user.uid)
+      );
+      const existingHearts = await getDocs(q);
+      
+      if (!existingHearts.empty) {
+        const heartDoc = existingHearts.docs[0];
+        await deleteDoc(heartDoc.ref);
+        
+        setReviewHearts(prev => ({
+          ...prev,
+          [reviewId]: prev[reviewId]?.filter(heart => heart.userId !== user.uid) || []
+        }));
+      } else {
+        const newHeart: Omit<ReviewHeart, 'id'> = {
+          reviewId,
+          userId: user.uid,
+          userName: user.displayName || 'Anonymous',
+          createdAt: Timestamp.now()
+        };
+        
+        const heartDocRef = await addDoc(heartsRef, newHeart);
+        
+        setReviewHearts(prev => ({
+          ...prev,
+          [reviewId]: [...(prev[reviewId] || []), { id: heartDocRef.id, ...newHeart }]
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to toggle heart:', error);
+      alert('Failed to update heart. Please try again.');
+    }
   }
-}
 
-function hasUserHearted(reviewId: string): boolean {
-  if (!user) return false;
-  return reviewHearts[reviewId]?.some(heart => heart.userId === user.uid) || false;
-}
+  function hasUserHearted(reviewId: string): boolean {
+    if (!user) return false;
+    return reviewHearts[reviewId]?.some(heart => heart.userId === user.uid) || false;
+  }
 
-function getHeartCount(reviewId: string): number {
-  return reviewHearts[reviewId]?.length || 0;
-}
-
+  function getHeartCount(reviewId: string): number {
+    return reviewHearts[reviewId]?.length || 0;
+  }
 
   const formatMinutes = (minutes: number): string => {
     const hours = Math.floor(minutes / 60);
@@ -382,7 +449,9 @@ function getHeartCount(reviewId: string): number {
     return `${mins}m`;
   };
 
-  // NEW: Screen Time Functions
+  // Keep all existing screen time and activity tracking functions...
+  // (loadScreenTimeSettings, loadTodayUsage, updateUsage, trackContentSession, etc.)
+
   const loadScreenTimeSettings = async (uid: string) => {
     try {
       const settingsDoc = await getDoc(doc(db, "users", uid, "settings", "screenTime"));
@@ -450,11 +519,10 @@ function getHeartCount(reviewId: string): number {
     }
   };
 
-  // NEW: Track session time for content consumption
   const trackContentSession = async (contentType: 'book' | 'video') => {
     if (!user || !screenTimeSettings?.enabled) return;
 
-    const sessionDuration = Math.floor((new Date().getTime() - sessionStartTime.getTime()) / (1000 * 60)); // minutes
+    const sessionDuration = Math.floor((new Date().getTime() - sessionStartTime.getTime()) / (1000 * 60));
     if (sessionDuration > 0) {
       await updateUsage(user.uid, contentType, sessionDuration);
     }
@@ -482,7 +550,9 @@ function getHeartCount(reviewId: string): number {
     }, 100);
   };
 
-  // Activity tracking functions (keeping existing ones)
+  // Keep all existing activity tracking functions...
+  // (hasActivity, markAsRead, markAsWatched, removeActivity, loadActivities)
+
   const hasActivity = (itemId: string, type: 'book' | 'video'): boolean => {
     return activities.some(activity => 
       activity.itemId === itemId && 
@@ -493,7 +563,6 @@ function getHeartCount(reviewId: string): number {
   const markAsRead = async (book: Book | ContentItem) => {
     if (!user) return alert('Please log in to track your reading activity.');
     
-    // Check screen time restrictions for books
     if (book && !canAccessContent('book')) {
       alert(getScreenTimeMessage() || 'Content access is restricted.');
       return;
@@ -516,11 +585,9 @@ function getHeartCount(reviewId: string): number {
       
       await setDoc(activityRef, newActivity);
       
-      // Update local state
       const activityWithId: Activity = { ...newActivity, id: itemId };
       setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === itemId && a.type === 'book'))]);
       
-      // Track content session
       await trackContentSession('book');
       
     } catch (error) {
@@ -532,7 +599,6 @@ function getHeartCount(reviewId: string): number {
   const markAsWatched = async (video: Video) => {
     if (!user) return alert('Please log in to track your viewing activity.');
     
-    // Check screen time restrictions for videos
     if (video && !canAccessContent('video')) {
       alert(getScreenTimeMessage() || 'Content access is restricted.');
       return;
@@ -555,11 +621,9 @@ function getHeartCount(reviewId: string): number {
       
       await setDoc(activityRef, newActivity);
       
-      // Update local state
       const activityWithId: Activity = { ...newActivity, id: itemId };
       setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === itemId && a.type === 'video'))]);
       
-      // Track content session (assume 5 minutes for a video view)
       await updateUsage(user.uid, 'video', 5);
       
     } catch (error) {
@@ -599,7 +663,9 @@ function getHeartCount(reviewId: string): number {
     }
   };
 
-  // Collection API calls (keeping existing ones)
+  // Keep all existing collection and API functions...
+  // (fetchCollectionItems, filterCollectionItems, searchBooks, searchVideos)
+
   const fetchCollectionItems = async (category: 'books' | 'videos') => {
     setLoading(true);
     setCollectionMessage(null);
@@ -652,7 +718,6 @@ function getHeartCount(reviewId: string): number {
     setFilteredCollectionItems(filtered);
   };
 
-  // API calls (keeping existing ones)
   const searchBooks = async () => {
     setLoading(true);
     try {
@@ -700,7 +765,7 @@ function getHeartCount(reviewId: string): number {
     }
   };
 
-  // NEW: Updated useEffect to load screen time data
+  // UPDATED: useEffect to load user profile and screen time data
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
@@ -709,10 +774,20 @@ function getHeartCount(reviewId: string): number {
           const snap = await getDoc(doc(db, "users", u.uid));
           if (snap.exists()) {
             const data = snap.data();
-            setRole(data.role || "");
+            const profile: UserProfile = {
+              role: data.role || "",
+              fullName: data.fullName || "",
+              interests: Array.isArray(data.interests) ? data.interests : 
+                        (typeof data.interests === 'string' ? [data.interests] : []),
+              ageRange: data.ageRange,
+              readingLevel: data.readingLevel
+            };
+            
+            setRole(profile.role);
+            setUserProfile(profile);
             
             // Load screen time settings and usage for children and students
-            if (data.role === "child" || data.role === "student") {
+            if (profile.role === "child" || profile.role === "student") {
               const settings = await loadScreenTimeSettings(u.uid);
               const usage = await loadTodayUsage(u.uid);
               
@@ -724,15 +799,18 @@ function getHeartCount(reviewId: string): number {
             }
           } else {
             setRole("");
+            setUserProfile(null);
           }
           loadFavourites(u.uid);
           loadActivities(u.uid);
         } catch (err) {
           console.error("Failed to load user data:", err);
           setRole("");
+          setUserProfile(null);
         }
       } else {
         setRole("");
+        setUserProfile(null);
         setFavourites([]);
         setActivities([]);
         setScreenTimeSettings(null);
@@ -744,7 +822,7 @@ function getHeartCount(reviewId: string): number {
     return () => unsub();
   }, []);
 
-  // NEW: Update screen time status when settings or usage change
+  // Update screen time status when settings or usage change
   useEffect(() => {
     if (screenTimeSettings && currentUsage) {
       const status = calculateScreenTimeStatus(screenTimeSettings, currentUsage);
@@ -753,7 +831,7 @@ function getHeartCount(reviewId: string): number {
     }
   }, [screenTimeSettings, currentUsage]);
 
-  // Favourites & Reviews & Reports (keeping existing functions)
+  // Keep all existing favourites and reviews functions...
   async function loadFavourites(uid: string) {
     const snap = await getDocs(collection(db, 'users', uid, 'favourites'));
     const favs: any[] = [];
@@ -768,7 +846,6 @@ function getHeartCount(reviewId: string): number {
   async function toggleFavourite(item: Book | Video | ContentItem, type: 'book' | 'video') {
     if (!user) return alert('Please log in to favourite items.');
     
-    // Check screen time restrictions
     if (!canAccessContent(type)) {
       alert(getScreenTimeMessage() || 'Content access is restricted.');
       return;
@@ -793,11 +870,9 @@ function getHeartCount(reviewId: string): number {
     }
   }
   
-
   async function submitReview() {
     if (!user || !selectedItem) return;
     
-    // Check screen time restrictions
     const itemType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
     if (!canAccessContent(itemType)) {
       alert(getScreenTimeMessage() || 'Content access is restricted.');
@@ -818,24 +893,23 @@ function getHeartCount(reviewId: string): number {
     await loadReviewsForItem(key);
   }
 
-async function loadReviewsForItem(itemId: string) {
-  const qRef = query(
-    collection(db, 'books-video-reviews'),
-    where('itemId', '==', itemId),
-    orderBy('createdAt', 'desc'),
-    limit(3)
-  );
-  const snap = await getDocs(qRef);
-  const revs: Review[] = [];
-  snap.forEach((doc) => revs.push({ id: doc.id, ...(doc.data() as any) } as Review));
-  setReviewsMap((prev) => ({ ...prev, [itemId]: revs }));
-  
-  // Load hearts for these reviews
-  const reviewIds = revs.map(r => r.id);
-  if (reviewIds.length > 0) {
-    await loadHeartsForReviews(reviewIds);
+  async function loadReviewsForItem(itemId: string) {
+    const qRef = query(
+      collection(db, 'books-video-reviews'),
+      where('itemId', '==', itemId),
+      orderBy('createdAt', 'desc'),
+      limit(3)
+    );
+    const snap = await getDocs(qRef);
+    const revs: Review[] = [];
+    snap.forEach((doc) => revs.push({ id: doc.id, ...(doc.data() as any) } as Review));
+    setReviewsMap((prev) => ({ ...prev, [itemId]: revs }));
+    
+    const reviewIds = revs.map(r => r.id);
+    if (reviewIds.length > 0) {
+      await loadHeartsForReviews(reviewIds);
+    }
   }
-}
 
   async function reportReview(reviewId: string) {
     if (!user) return;
@@ -894,7 +968,7 @@ async function loadReviewsForItem(itemId: string) {
     }
   }, [selectedItem]);
 
-  // Event handlers (keeping existing ones)
+  // Event handlers
   const handleSearch = () => {
     setBooksPage(1);
     setVideosPage(1);
@@ -908,14 +982,13 @@ async function loadReviewsForItem(itemId: string) {
   };
 
   const handleModeChange = (newMode: 'books' | 'videos' | 'collection-books' | 'collection-videos') => {
-    // Check screen time restrictions for video mode
     if ((newMode === 'videos' || newMode === 'collection-videos') && !canAccessContent('video')) {
       alert(getScreenTimeMessage() || 'Video content is restricted.');
       return;
     }
 
     setMode(newMode);
-    setSearchQuery(''); // Clear search when switching modes
+    setSearchQuery('');
     if (newMode === 'books') {
       setBooksPage(1);
     } else if (newMode === 'videos') {
@@ -923,7 +996,14 @@ async function loadReviewsForItem(itemId: string) {
     }
   };
 
+  // UPDATED: Handle bucket change with interest filtering
   const handleBucketChange = (newBucket: string) => {
+    // For child/student users with selected interests, only allow selection of their interest categories or "All"
+    if (isChildOrStudentRole() && hasSelectedInterests() && newBucket && !getUserInterestCategories().includes(newBucket)) {
+      alert('This category is not in your selected interests. Ask a parent to update your interests.');
+      return;
+    }
+    
     setBucket(newBucket);
     setBooksPage(1);
   };
@@ -934,12 +1014,18 @@ async function loadReviewsForItem(itemId: string) {
     }
   };
 
+  // UPDATED: Handle video bucket change with interest filtering
   const handleVideoBucketChange = (newBucket: keyof typeof videoBucketDisplayNames) => {
+    // For child/student users with selected interests, only allow selection of their interest categories
+    if (isChildOrStudentRole() && hasSelectedInterests() && !getUserInterestCategories().includes(newBucket)) {
+      alert('This category is not in your selected interests. Ask a parent to update your interests.');
+      return;
+    }
+    
     setVideoBucket(newBucket);
     setVideosPage(1);
   };
 
-  // NEW: Handle content item click with screen time check
   const handleContentItemClick = (item: Book | Video | ContentItem) => {
     const contentType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
     
@@ -949,12 +1035,10 @@ async function loadReviewsForItem(itemId: string) {
     }
 
     setSelectedItem(item);
-    
-    // Start session tracking when opening content
     setSessionStartTime(new Date());
   };
 
-  // Pagination components
+  // Keep existing pagination components...
   const BooksPagination = () => {
     const totalPages = totalApprox ? Math.max(1, Math.ceil(totalApprox / pageSize)) : null;
     const windowSize = 9;
@@ -1049,7 +1133,6 @@ async function loadReviewsForItem(itemId: string) {
     );
   };
 
-  // Get current items to display
   const getCurrentItems = () => {
     switch (mode) {
       case 'books':
@@ -1064,7 +1147,6 @@ async function loadReviewsForItem(itemId: string) {
     }
   };
 
-  // Get search placeholder text
   const getSearchPlaceholder = () => {
     switch (mode) {
       case 'books':
@@ -1083,7 +1165,7 @@ async function loadReviewsForItem(itemId: string) {
   return (
     <main className="bg-white">
       <div className="max-w-6xl mx-auto p-6 font-sans text-gray-900">
-        {/* NEW: Screen Time Status Banner */}
+        {/* Screen Time Status Banner */}
         {screenTimeSettings?.enabled && screenTimeStatus !== 'within-limits' && (
           <div className={`mb-4 p-4 rounded-xl border flex items-center gap-3 ${
             screenTimeStatus === 'bedtime' 
@@ -1129,10 +1211,37 @@ async function loadReviewsForItem(itemId: string) {
           </div>
         )}
 
+        {/* NEW: Interest-based message for child/student users */}
+        {isChildOrStudentRole() && (
+          <div className="mb-4 p-4 rounded-xl border flex items-center gap-3">
+            <BookOpen className="w-5 h-5 flex-shrink-0" />
+            <div>
+              {hasSelectedInterests() ? (
+                <div className="bg-blue-50 border-blue-200">
+                  <h3 className="font-medium text-blue-800">Your Personalized Content</h3>
+                  <p className="text-sm text-blue-700">
+                    Showing content based on your interests: {userProfile?.interests?.map(interest => 
+                      bucketDisplayNames[interest as keyof typeof bucketDisplayNames] || 
+                      videoBucketDisplayNames[interest as keyof typeof videoBucketDisplayNames] || 
+                      interest
+                    ).join(', ')}
+                  </p>
+                </div>
+              ) : (
+                <div className="bg-gray-50 border-gray-200">
+                  <h3 className="font-medium text-gray-800">All Content Available</h3>
+                  <p className="text-sm text-gray-700">
+                    You haven't selected any interests yet, so all content categories are available. Ask a parent or educator to set up your interests for a more personalized experience.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-2xl font-bold">Discover Books & Videos for Kids</h1>
           
-          {/* Activity Panel Toggle */}
           {user && (
             <button
               onClick={() => setShowActivityPanel(!showActivityPanel)}
@@ -1144,7 +1253,7 @@ async function loadReviewsForItem(itemId: string) {
           )}
         </div>
 
-        {/* Activity Panel */}
+        {/* Activity Panel - keep existing implementation */}
         {showActivityPanel && user && (
           <div className="mb-6 bg-gray-50 rounded-xl p-4 border">
             <div className="flex items-center justify-between mb-3">
@@ -1254,37 +1363,57 @@ async function loadReviewsForItem(itemId: string) {
           </button>
         </div>
 
-        {/* Video chips - only show for external videos */}
+        {/* UPDATED: Video chips with interest-based filtering */}
         {mode === 'videos' && (
           <div className="flex flex-wrap gap-2 mb-6">
-            {Object.entries(videoBucketDisplayNames).map(([key, label]) => (
+            {getAvailableVideoBuckets().map((key) => (
               <button
                 key={key}
-                onClick={() => handleVideoBucketChange(key as keyof typeof videoBucketDisplayNames)}
-                className={`px-3 py-1.5 rounded-full text-sm border ${videoBucket === key ? 'bg-black text-white border-black' : 'bg-gray-100 border-gray-300 hover:bg-gray-200'}`}
+                onClick={() => handleVideoBucketChange(key)}
+                className={`px-3 py-1.5 rounded-full text-sm border transition-all ${
+                  videoBucket === key 
+                    ? 'bg-black text-white border-black' 
+                    : shouldHighlightCategory(key)
+                    ? 'bg-blue-100 border-blue-300 text-blue-800 hover:bg-blue-200'
+                    : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
+                }`}
               >
-                {label}
+                {videoBucketDisplayNames[key]}
+                {shouldHighlightCategory(key) && (
+                  <span className="ml-1 text-xs">✨</span>
+                )}
               </button>
             ))}
           </div>
         )}
 
-        {/* Book chips - only show for external books */}
+        {/* UPDATED: Book chips with interest-based filtering */}
         {mode === 'books' && (
           <div className="flex flex-wrap gap-2 mb-6">
             <button
               onClick={() => handleBucketChange('')}
-              className={`px-3 py-1.5 rounded-full text-sm border ${bucket === '' ? 'bg-black text-white border-black' : 'bg-gray-100 border-gray-300 hover:bg-gray-200'}`}
+              className={`px-3 py-1.5 rounded-full text-sm border ${
+                bucket === '' ? 'bg-black text-white border-black' : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
+              }`}
             >
               All
             </button>
-            {Object.entries(bucketDisplayNames).map(([key, label]) => (
+            {getAvailableBuckets().map((key) => (
               <button
                 key={key}
                 onClick={() => handleBucketChange(key)}
-                className={`px-3 py-1.5 rounded-full text-sm border ${bucket === key ? 'bg-black text-white border-black' : 'bg-gray-100 border-gray-300 hover:bg-gray-200'}`}
+                className={`px-3 py-1.5 rounded-full text-sm border transition-all ${
+                  bucket === key 
+                    ? 'bg-black text-white border-black' 
+                    : shouldHighlightCategory(key)
+                    ? 'bg-blue-100 border-blue-300 text-blue-800 hover:bg-blue-200'
+                    : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
+                }`}
               >
-                {label}
+                {bucketDisplayNames[key as keyof typeof bucketDisplayNames]}
+                {shouldHighlightCategory(key) && (
+                  <span className="ml-1 text-xs">✨</span>
+                )}
               </button>
             ))}
           </div>
@@ -1297,6 +1426,7 @@ async function loadReviewsForItem(itemId: string) {
         {collectionMessage && (
           <div className="text-center py-4 text-red-500 font-medium">{collectionMessage}</div>
         )}
+
 
         {/* Results */}
         {!loading && (
