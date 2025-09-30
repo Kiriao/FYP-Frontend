@@ -143,7 +143,7 @@ export default function CheckoutClient() {
         plan: planData.name,
         planId: planId,
         amount: planData.isTrial ? 0 : planData.price,
-        status: planData.isTrial ? "trial" : "pending",
+        status: planData.isTrial ? "trial" : "paid",
         createdAt: serverTimestamp(),
         expiresAt: expirationDate,
         isActive: true,
