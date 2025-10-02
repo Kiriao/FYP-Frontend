@@ -219,7 +219,7 @@ export default function ForgotPasswordPage() {
         {/* Footer Help Text */}
         <p className="text-center text-sm text-gray-500 mt-6">
           Still need help?{" "}
-          <a href="/support" className="text-pink-600 hover:underline">
+          <a href="/contact" className="text-pink-600 hover:underline">
             Contact support
           </a>
         </p>

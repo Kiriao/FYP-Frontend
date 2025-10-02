@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 /* ------------------ TYPES ------------------ */
 type CategoryType = "books" | "videos";
@@ -40,36 +40,49 @@ export default function ContentManagerPage() {
     "publish"
   );
 
+  const tabs = [
+    { id: "publish" as const, label: "Publish", icon: "📤" },
+    { id: "schedule" as const, label: "Schedule", icon: "📅" },
+    { id: "update" as const, label: "Update", icon: "✏️" },
+    { id: "remove" as const, label: "Remove", icon: "🗑️" },
+  ];
+
   return (
-    <section className="bg-gray-100 min-h-screen flex">
+    <section className="bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen flex">
       {/* Sidebar */}
-      <aside className="w-64 bg-white shadow-md p-6 flex flex-col">
-        <h2 className="text-xl font-bold text-pink-600 mb-6">
-          Content Manager
-        </h2>
-        <nav className="flex flex-col gap-2">
-          {(["publish", "update", "remove", "schedule"] as const).map((tab) => (
+      <aside className="w-64 bg-white shadow-lg flex flex-col border-r border-gray-200">
+        <div className="p-6 border-b border-gray-200">
+          <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-600 to-purple-600">
+            Content Manager
+          </h2>
+          <p className="text-sm text-gray-500 mt-1">Manage your library</p>
+        </div>
+        <nav className="flex-1 p-4 space-y-2">
+          {tabs.map((tab) => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 text-left rounded-md font-semibold transition ${
-                activeTab === tab
-                  ? "bg-pink-600 text-white"
-                  : "bg-gray-200 text-gray-800 hover:bg-gray-300"
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`w-full px-4 py-3 text-left rounded-lg font-semibold transition-all duration-200 flex items-center gap-3 ${
+                activeTab === tab.id
+                  ? "bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-md transform scale-105"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200 hover:transform hover:scale-102"
               }`}
             >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              <span className="text-xl">{tab.icon}</span>
+              <span>{tab.label}</span>
             </button>
           ))}
         </nav>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 p-8">
-        {activeTab === "publish" && <PublishForm />}
-        {activeTab === "update" && <UpdateForm />}
-        {activeTab === "remove" && <RemoveForm />}
-        {activeTab === "schedule" && <ScheduleForm />}
+      <main className="flex-1 p-8 overflow-y-auto">
+        <div className="max-w-5xl mx-auto">
+          {activeTab === "publish" && <PublishForm />}
+          {activeTab === "update" && <UpdateForm />}
+          {activeTab === "remove" && <RemoveForm />}
+          {activeTab === "schedule" && <ScheduleForm />}
+        </div>
       </main>
     </section>
   );
@@ -87,7 +100,7 @@ function PublishForm() {
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const generateId = () => title.trim().replace(/\s+/g, "-");
+  const generateId = () => title.trim().replace(/\s+/g, "-").toLowerCase();
 
   const handleCategoryToggle = (cat: string) => {
     setSelectedCategories((prev) =>
@@ -95,7 +108,21 @@ function PublishForm() {
     );
   };
 
+  const resetForm = () => {
+    setTitle("");
+    setAuthors("");
+    setSelectedCategories([]);
+    setSynopsis("");
+    setThumbnail("");
+    setLink("");
+  };
+
   const handlePublish = async () => {
+    if (!title.trim() || !authors.trim()) {
+      setMessage("❌ Title and Authors are required");
+      return;
+    }
+
     setLoading(true);
     setMessage(null);
 
@@ -104,12 +131,12 @@ function PublishForm() {
 
     const newItem = {
       id,
-      title,
-      authors: authors.split(",").map((a) => a.trim()),
+      title: title.trim(),
+      authors: authors.split(",").map((a) => a.trim()).filter(Boolean),
       categories: selectedCategories,
-      synopsis,
-      thumbnail,
-      link,
+      synopsis: synopsis.trim(),
+      thumbnail: thumbnail.trim(),
+      link: link.trim(),
     };
 
     try {
@@ -130,13 +157,9 @@ function PublishForm() {
       if (!res.ok) {
         setMessage(`❌ Publish failed: ${data.error}\n${data.details || ""}`);
       } else {
-        setMessage(`✅ Published ${filename} in ${category}`);
-        setTitle("");
-        setAuthors("");
-        setSelectedCategories([]);
-        setSynopsis("");
-        setThumbnail("");
-        setLink("");
+        setMessage(`✅ Successfully published "${title}" to ${category}`);
+        resetForm();
+        setTimeout(() => setMessage(null), 5000);
       }
     } catch (err: any) {
       setMessage("❌ Error: " + err.message);
@@ -146,74 +169,118 @@ function PublishForm() {
   };
 
   return (
-    <section className="bg-white py-16 px-6 max-w-3xl mx-auto rounded-xl shadow-md border space-y-6">
-      <h2 className="text-2xl font-bold text-pink-600 mb-4 text-center">
-        Publish Content
-      </h2>
+    <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+      <div className="bg-gradient-to-r from-pink-600 to-purple-600 p-6">
+        <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+          <span>📤</span> Publish New Content
+        </h2>
+        <p className="text-pink-100 mt-1">Add new books or videos to your library</p>
+      </div>
+
       <form
         onSubmit={(e) => {
           e.preventDefault();
           handlePublish();
         }}
-        className="bg-white p-6 rounded-xl shadow-md border border-gray-200 space-y-4 max-w-3xl mx-auto text-gray-800"
+        className="p-6 space-y-6"
       >
         <CategoryToggle category={category} setCategory={setCategory} />
 
-        <input
-          type="text"
-          placeholder="Title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          className="w-full px-4 py-2 border rounded-md text-gray-800"
-          required
-        />
-        <input
-          type="text"
-          placeholder="Authors (comma separated)"
-          value={authors}
-          onChange={(e) => setAuthors(e.target.value)}
-          className="w-full px-4 py-2 border rounded-md text-gray-800"
-          required
-        />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Title *
+            </label>
+            <input
+              type="text"
+              placeholder="Enter title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Authors *
+            </label>
+            <input
+              type="text"
+              placeholder="John Doe, Jane Smith"
+              value={authors}
+              onChange={(e) => setAuthors(e.target.value)}
+              className="w-full px-4 py-3 border text-gray-900 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+              required
+            />
+          </div>
+        </div>
 
         <CheckboxGroup selected={selectedCategories} toggle={handleCategoryToggle} />
 
-        <textarea
-          placeholder="Synopsis"
-          value={synopsis}
-          onChange={(e) => setSynopsis(e.target.value)}
-          className="w-full px-4 py-2 border rounded-md text-gray-800"
-        />
-        <input
-          type="text"
-          placeholder="Thumbnail URL"
-          value={thumbnail}
-          onChange={(e) => setThumbnail(e.target.value)}
-          className="w-full px-4 py-2 border rounded-md"
-        />
-        <input
-          type="url"
-          placeholder="Book / Video Link"
-          value={link}
-          onChange={(e) => setLink(e.target.value)}
-          className="w-full px-4 py-2 border rounded-md"
-        />
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Synopsis
+          </label>
+          <textarea
+            placeholder="Brief description of the content..."
+            value={synopsis}
+            onChange={(e) => setSynopsis(e.target.value)}
+            rows={4}
+            className="w-full px-4 py-3 text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition resize-none"
+          />
+        </div>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className={`w-full py-2 rounded-md font-semibold transition ${
-            loading
-              ? "bg-gray-400 text-white cursor-not-allowed"
-              : "bg-pink-600 text-white hover:bg-pink-700"
-          }`}
-        >
-          {loading ? "Publishing..." : "Publish"}
-        </button>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Thumbnail URL
+            </label>
+            <input
+              type="url"
+              placeholder="https://example.com/image.jpg"
+              value={thumbnail}
+              onChange={(e) => setThumbnail(e.target.value)}
+              className="w-full px-4 py-3 text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Content Link
+            </label>
+            <input
+              type="url"
+              placeholder="https://example.com/content"
+              value={link}
+              onChange={(e) => setLink(e.target.value)}
+              className="w-full px-4 py-3 text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-3 pt-4">
+          <button
+            type="submit"
+            disabled={loading}
+            className={`flex-1 py-3 rounded-lg font-semibold transition-all duration-200 ${
+              loading
+                ? "bg-gray-400 text-white cursor-not-allowed"
+                : "bg-gradient-to-r from-pink-600 to-purple-600 text-white hover:shadow-lg hover:transform hover:scale-105"
+            }`}
+          >
+            {loading ? "Publishing..." : "Publish Now"}
+          </button>
+          <button
+            type="button"
+            onClick={resetForm}
+            className="px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-100 transition"
+          >
+            Clear
+          </button>
+        </div>
 
         {message && <ResponseMessage message={message} />}
       </form>
-    </section>
+    </div>
   );
 }
 
@@ -232,14 +299,13 @@ function ScheduleForm() {
   const [loading, setLoading] = useState(false);
   const [scheduledItems, setScheduledItems] = useState<ScheduledItem[]>([]);
   const [showScheduled, setShowScheduled] = useState(false);
+  const [filter, setFilter] = useState<"all" | "pending" | "published" | "failed">("all");
 
-  // Load scheduled items on component mount
   useEffect(() => {
     loadScheduledItems();
   }, []);
 
   const loadScheduledItems = () => {
-    // Using in-memory storage instead of localStorage
     setScheduledItems([]);
   };
 
@@ -247,7 +313,7 @@ function ScheduleForm() {
     setScheduledItems(items);
   };
 
-  const generateId = () => title.trim().replace(/\s+/g, "-");
+  const generateId = () => title.trim().replace(/\s+/g, "-").toLowerCase();
 
   const handleCategoryToggle = (cat: string) => {
     setSelectedCategories((prev) =>
@@ -262,7 +328,23 @@ function ScheduleForm() {
     return { date, time };
   };
 
+  const resetForm = () => {
+    setTitle("");
+    setAuthors("");
+    setSelectedCategories([]);
+    setSynopsis("");
+    setThumbnail("");
+    setLink("");
+    setScheduledDate("");
+    setScheduledTime("");
+  };
+
   const handleSchedule = async () => {
+    if (!title.trim() || !authors.trim()) {
+      setMessage("❌ Title and Authors are required");
+      return;
+    }
+
     if (!scheduledDate || !scheduledTime) {
       setMessage("❌ Please select both date and time");
       return;
@@ -282,33 +364,24 @@ function ScheduleForm() {
     const id = generateId();
     const scheduledItem: ScheduledItem = {
       id,
-      title,
-      authors: authors.split(",").map((a) => a.trim()),
+      title: title.trim(),
+      authors: authors.split(",").map((a) => a.trim()).filter(Boolean),
       categories: selectedCategories,
-      synopsis,
-      thumbnail,
-      link,
+      synopsis: synopsis.trim(),
+      thumbnail: thumbnail.trim(),
+      link: link.trim(),
       category,
       scheduledDate: scheduledDateTime.toISOString(),
       status: "pending"
     };
 
     try {
-      // Save to scheduled items
       const newScheduledItems = [...scheduledItems, scheduledItem];
       saveScheduledItems(newScheduledItems);
 
-      setMessage(`✅ Scheduled "${title}" for ${scheduledDate} at ${scheduledTime}`);
-      
-      // Clear form
-      setTitle("");
-      setAuthors("");
-      setSelectedCategories([]);
-      setSynopsis("");
-      setThumbnail("");
-      setLink("");
-      setScheduledDate("");
-      setScheduledTime("");
+      setMessage(`✅ Scheduled "${title}" for ${scheduledDateTime.toLocaleString()}`);
+      resetForm();
+      setTimeout(() => setMessage(null), 5000);
 
     } catch (err: any) {
       setMessage("❌ Error: " + err.message);
@@ -339,7 +412,6 @@ function ScheduleForm() {
       });
 
       if (res.ok) {
-        // Update item status
         const updatedItems = scheduledItems.map(si => 
           si.id === item.id ? { ...si, status: "published" as const } : si
         );
@@ -363,289 +435,341 @@ function ScheduleForm() {
     saveScheduledItems(updatedItems);
   };
 
-  const checkAndPublishScheduled = () => {
+  const checkAndPublishScheduled = useCallback(() => {
     const now = new Date();
     scheduledItems.forEach(item => {
       if (item.status === "pending" && new Date(item.scheduledDate) <= now) {
         handlePublishNow(item);
       }
     });
-  };
+  }, [scheduledItems]);
 
-  // Check for items to publish every minute
   useEffect(() => {
     const interval = setInterval(checkAndPublishScheduled, 60000);
     return () => clearInterval(interval);
-  }, [scheduledItems]);
+  }, [checkAndPublishScheduled]);
 
-  const pendingItems = scheduledItems.filter(item => item.status === "pending");
-  const publishedItems = scheduledItems.filter(item => item.status === "published");
-  const failedItems = scheduledItems.filter(item => item.status === "failed");
+  const filteredItems = scheduledItems.filter(item => 
+    filter === "all" || item.status === filter
+  );
+
+  const counts = {
+    pending: scheduledItems.filter(i => i.status === "pending").length,
+    published: scheduledItems.filter(i => i.status === "published").length,
+    failed: scheduledItems.filter(i => i.status === "failed").length,
+  };
 
   return (
-    <section className="bg-white py-16 px-6 max-w-4xl mx-auto rounded-xl shadow-md border space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-pink-600">
-          Schedule Content
-        </h2>
-        <button
-          onClick={() => setShowScheduled(!showScheduled)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
-        >
-          {showScheduled ? "Hide" : "Show"} Scheduled ({scheduledItems.length})
-        </button>
-      </div>
-
-      {!showScheduled ? (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleSchedule();
-          }}
-          className="space-y-4"
-        >
-          <CategoryToggle category={category} setCategory={setCategory} />
-
-          <input
-            type="text"
-            placeholder="Title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full px-4 py-2 border rounded-md text-gray-800"
-            required
-          />
-          <input
-            type="text"
-            placeholder="Authors (comma separated)"
-            value={authors}
-            onChange={(e) => setAuthors(e.target.value)}
-            className="w-full px-4 py-2 border rounded-md text-gray-800"
-            required
-          />
-
-          <CheckboxGroup selected={selectedCategories} toggle={handleCategoryToggle} />
-
-          <textarea
-            placeholder="Synopsis"
-            value={synopsis}
-            onChange={(e) => setSynopsis(e.target.value)}
-            className="w-full px-4 py-2 border rounded-md text-gray-800"
-            rows={3}
-          />
-          <input
-            type="text"
-            placeholder="Thumbnail URL"
-            value={thumbnail}
-            onChange={(e) => setThumbnail(e.target.value)}
-            className="w-full px-4 py-2 border rounded-md text-gray-800"
-          />
-          <input
-            type="url"
-            placeholder="Book / Video Link"
-            value={link}
-            onChange={(e) => setLink(e.target.value)}
-            className="w-full px-4 py-2 border rounded-md text-gray-800"
-          />
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Schedule Date
-              </label>
-              <input
-                type="date"
-                value={scheduledDate}
-                onChange={(e) => setScheduledDate(e.target.value)}
-                min={getCurrentDateTime().date}
-                className="w-full px-4 py-2 border rounded-md text-gray-800"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Schedule Time
-              </label>
-              <input
-                type="time"
-                value={scheduledTime}
-                onChange={(e) => setScheduledTime(e.target.value)}
-                className="w-full px-4 py-2 border rounded-md text-gray-800"
-                required
-              />
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className={`w-full py-2 rounded-md font-semibold transition ${
-              loading
-                ? "bg-gray-400 text-white cursor-not-allowed"
-                : "bg-pink-600 text-white hover:bg-pink-700"
-            }`}
-          >
-            {loading ? "Scheduling..." : "Schedule for Later"}
-          </button>
-
-          {message && <ResponseMessage message={message} />}
-        </form>
-      ) : (
-        <div className="space-y-6">
-          {/* Pending Items */}
+    <div className="space-y-6">
+      <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+        <div className="bg-gradient-to-r from-pink-600 to-purple-600 p-6 flex justify-between items-center">
           <div>
-            <h3 className="text-lg font-semibold text-gray-800 mb-3">
-              Pending ({pendingItems.length})
-            </h3>
-            <div className="space-y-3">
-              {pendingItems.map((item) => (
-                <div key={item.id} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <h4 className="font-medium text-gray-900">{item.title}</h4>
-                      <p className="text-sm text-gray-600">
-                        by {item.authors.join(", ")} • {item.category}
-                      </p>
-                      <p className="text-sm text-gray-500 mt-1">
-                        Scheduled: {new Date(item.scheduledDate).toLocaleString()}
-                      </p>
-                    </div>
-                    <div className="flex gap-2 ml-4">
-                      <button
-                        onClick={() => handlePublishNow(item)}
-                        className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
-                      >
-                        Publish Now
-                      </button>
-                      <button
-                        onClick={() => handleDeleteScheduled(item.id)}
-                        className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700"
-                      >
-                        Delete
-                      </button>
-                    </div>
+            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+              <span>📅</span> Schedule Content
+            </h2>
+            <p className="text-pink-100 mt-1">Plan content for automatic publishing</p>
+          </div>
+          <button
+            onClick={() => setShowScheduled(!showScheduled)}
+            className="px-4 py-2 bg-white text-pink-600 rounded-lg font-semibold hover:bg-pink-50 transition flex items-center gap-2"
+          >
+            {showScheduled ? "📝 New Schedule" : `📋 View Scheduled (${scheduledItems.length})`}
+          </button>
+        </div>
+
+        <div className="p-6">
+          {!showScheduled ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSchedule();
+              }}
+              className="space-y-6"
+            >
+              <CategoryToggle category={category} setCategory={setCategory} />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Title *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter title"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 text-gray-900 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Authors *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="John Doe, Jane Smith"
+                    value={authors}
+                    onChange={(e) => setAuthors(e.target.value)}
+                    className="w-full px-4 py-3 border text-gray-900 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+                    required
+                  />
+                </div>
+              </div>
+
+              <CheckboxGroup selected={selectedCategories} toggle={handleCategoryToggle} />
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Synopsis
+                </label>
+                <textarea
+                  placeholder="Brief description..."
+                  value={synopsis}
+                  onChange={(e) => setSynopsis(e.target.value)}
+                  rows={3}
+                  className="w-full px-4 py-3 border border-gray-300 text-gray-900 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition resize-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Thumbnail URL
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://example.com/image.jpg"
+                    value={thumbnail}
+                    onChange={(e) => setThumbnail(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 text-gray-900 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Content Link
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://example.com/content"
+                    value={link}
+                    onChange={(e) => setLink(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                <p className="text-sm font-semibold text-purple-900 mb-3">Schedule Settings</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      📅 Date *
+                    </label>
+                    <input
+                      type="date"
+                      value={scheduledDate}
+                      onChange={(e) => setScheduledDate(e.target.value)}
+                      min={getCurrentDateTime().date}
+                      className="w-full px-4 py-3 text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      ⏰ Time *
+                    </label>
+                    <input
+                      type="time"
+                      value={scheduledTime}
+                      onChange={(e) => setScheduledTime(e.target.value)}
+                      className="w-full px-4 py-3 border text-gray-900 border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition"
+                      required
+                    />
                   </div>
                 </div>
-              ))}
-              {pendingItems.length === 0 && (
-                <p className="text-gray-500">No pending scheduled items</p>
-              )}
-            </div>
-          </div>
+              </div>
 
-          {/* Published Items */}
-          {publishedItems.length > 0 && (
-            <div>
-              <h3 className="text-lg font-semibold text-green-600 mb-3">
-                Published ({publishedItems.length})
-              </h3>
-              <div className="space-y-2">
-                {publishedItems.map((item) => (
-                  <div key={item.id} className="border border-green-200 rounded-lg p-3 bg-green-50">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <h4 className="font-medium text-gray-900">{item.title}</h4>
-                        <p className="text-sm text-gray-600">
-                          Published • {item.category}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => handleDeleteScheduled(item.id)}
-                        className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className={`flex-1 py-3 rounded-lg font-semibold transition-all duration-200 ${
+                    loading
+                      ? "bg-gray-400 text-white cursor-not-allowed"
+                      : "bg-gradient-to-r from-pink-600 to-purple-600 text-white hover:shadow-lg hover:transform hover:scale-105"
+                  }`}
+                >
+                  {loading ? "Scheduling..." : "Schedule for Later"}
+                </button>
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-100 transition"
+                >
+                  Clear
+                </button>
+              </div>
+
+              {message && <ResponseMessage message={message} />}
+            </form>
+          ) : (
+            <div className="space-y-4">
+              {/* Filter Tabs */}
+              <div className="flex gap-2 border-b border-gray-200 pb-3">
+                {(["all", "pending", "published", "failed"] as const).map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => setFilter(status)}
+                    className={`px-4 py-2 rounded-lg font-medium transition ${
+                      filter === status
+                        ? "bg-pink-600 text-white"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
+                  >
+                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                    {status !== "all" && ` (${counts[status]})`}
+                  </button>
                 ))}
               </div>
-            </div>
-          )}
 
-          {/* Failed Items */}
-          {failedItems.length > 0 && (
-            <div>
-              <h3 className="text-lg font-semibold text-red-600 mb-3">
-                Failed ({failedItems.length})
-              </h3>
-              <div className="space-y-2">
-                {failedItems.map((item) => (
-                  <div key={item.id} className="border border-red-200 rounded-lg p-3 bg-red-50">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <h4 className="font-medium text-gray-900">{item.title}</h4>
-                        <p className="text-sm text-red-600">
-                          Publish failed • {item.category}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handlePublishNow(item)}
-                          className="px-2 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600"
-                        >
-                          Retry
-                        </button>
-                        <button
-                          onClick={() => handleDeleteScheduled(item.id)}
-                          className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+              {/* Items List */}
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {filteredItems.map((item) => (
+                  <ScheduledItemCard
+                    key={item.id}
+                    item={item}
+                    onPublish={handlePublishNow}
+                    onDelete={handleDeleteScheduled}
+                  />
                 ))}
+                {filteredItems.length === 0 && (
+                  <div className="text-center py-12">
+                    <p className="text-gray-500 text-lg">No {filter} items</p>
+                  </div>
+                )}
               </div>
             </div>
           )}
         </div>
-      )}
-    </section>
+      </div>
+    </div>
+  );
+}
+
+function ScheduledItemCard({ 
+  item, 
+  onPublish, 
+  onDelete 
+}: { 
+  item: ScheduledItem; 
+  onPublish: (item: ScheduledItem) => void; 
+  onDelete: (id: string) => void; 
+}) {
+  const statusConfig = {
+    pending: { bg: "bg-yellow-50", border: "border-yellow-200", text: "text-yellow-700", badge: "bg-yellow-100 text-yellow-800" },
+    published: { bg: "bg-green-50", border: "border-green-200", text: "text-green-700", badge: "bg-green-100 text-green-800" },
+    failed: { bg: "bg-red-50", border: "border-red-200", text: "text-red-700", badge: "bg-red-100 text-red-800" },
+  };
+
+  const config = statusConfig[item.status];
+  const scheduledDate = new Date(item.scheduledDate);
+
+  return (
+    <div className={`${config.bg} border ${config.border} rounded-lg p-4`}>
+      <div className="flex justify-between items-start gap-4">
+        <div className="flex-1">
+          <div className="flex items-start gap-3">
+            <div className="flex-1">
+              <h4 className="font-semibold text-gray-900 text-lg">{item.title}</h4>
+              <p className="text-sm text-gray-600 mt-1">
+                by {item.authors.join(", ")} • {item.category}
+              </p>
+              <div className="flex items-center gap-2 mt-2">
+                <span className={`text-xs px-2 py-1 rounded-full font-medium ${config.badge}`}>
+                  {item.status.toUpperCase()}
+                </span>
+                <span className="text-xs text-gray-500">
+                  {scheduledDate.toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {item.status === "pending" && (
+            <button
+              onClick={() => onPublish(item)}
+              className="px-3 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition font-medium"
+            >
+              Publish Now
+            </button>
+          )}
+          {item.status === "failed" && (
+            <button
+              onClick={() => onPublish(item)}
+              className="px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition font-medium"
+            >
+              Retry
+            </button>
+          )}
+          <button
+            onClick={() => onDelete(item.id)}
+            className="px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition font-medium"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
 /* ------------------ UPDATE FORM ------------------ */
 function UpdateForm() {
-  const availableCategories = DISCOVERY_CATEGORIES;
-
   const [category, setCategory] = useState<CategoryType>("books");
   const [files, setFiles] = useState<FileItem[]>([]);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [formData, setFormData] = useState<any>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  // Load files + titles
   useEffect(() => {
-    const fetchFiles = async () => {
-      try {
-        const res = await fetch(`/api/github/list-files?category=${category}`);
-        const filesData: FileItem[] = await res.json();
-
-        const filesWithTitles = await Promise.all(
-          filesData.map(async (file) => {
-            try {
-              const fileRes = await fetch(
-                `/api/github/get-file?path=${encodeURIComponent(file.path)}`
-              );
-              const data = await fileRes.json();
-              return { ...file, title: data.title || file.name };
-            } catch {
-              return { ...file, title: file.name };
-            }
-          })
-        );
-
-        setFiles(filesWithTitles);
-        setSelectedFile(null);
-        setFormData(null);
-      } catch (err) {
-        console.error(err);
-      }
-    };
     fetchFiles();
   }, [category]);
 
-  // Fetch selected file content
+  const fetchFiles = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/github/list-files?category=${category}`);
+      const filesData: FileItem[] = await res.json();
+
+      const filesWithTitles = await Promise.all(
+        filesData.map(async (file) => {
+          try {
+            const fileRes = await fetch(
+              `/api/github/get-file?path=${encodeURIComponent(file.path)}`
+            );
+            const data = await fileRes.json();
+            return { ...file, title: data.title || file.name };
+          } catch {
+            return { ...file, title: file.name };
+          }
+        })
+      );
+
+      setFiles(filesWithTitles);
+      setSelectedFile(null);
+      setFormData(null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!selectedFile) return;
     fetch(`/api/github/get-file?path=${encodeURIComponent(selectedFile.path)}`)
@@ -678,7 +802,7 @@ function UpdateForm() {
   };
 
   const handleUpdate = async () => {
-    if (!selectedFile || !formData) return alert("Select a file first");
+    if (!selectedFile || !formData) return;
 
     setShowConfirm(false);
     setMessage(null);
@@ -696,137 +820,199 @@ function UpdateForm() {
       });
 
       const data = await res.json();
-      if (res.ok) setMessage("✅ Update successful!");
-      else setMessage("❌ Update failed: " + data.error);
+      if (res.ok) {
+        setMessage("✅ Update successful!");
+        setTimeout(() => setMessage(null), 5000);
+      } else {
+        setMessage("❌ Update failed: " + data.error);
+      }
     } catch (err: any) {
       setMessage("❌ Error: " + err.message);
     }
   };
 
+  const filteredFiles = files.filter(file => 
+    file.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    file.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
-    <section className="bg-white py-16 px-6 max-w-3xl mx-auto rounded-xl shadow-md border space-y-6">
-      <h2 className="text-2xl font-bold text-pink-600 mb-4 text-center">
-        Update Content
-      </h2>
+    <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+      <div className="bg-gradient-to-r from-pink-600 to-purple-600 p-6">
+        <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+          <span>✏️</span> Update Content
+        </h2>
+        <p className="text-pink-100 mt-1">Edit existing books or videos</p>
+      </div>
 
-      <CategoryToggle category={category} setCategory={setCategory} />
+      <div className="p-6 space-y-6">
+        <CategoryToggle category={category} setCategory={setCategory} />
 
-      {/* File List */}
-      <ul className="space-y-2 mb-6">
-        {files.map((file) => (
-          <li
-            key={file.sha}
-            onClick={() =>
-              setSelectedFile(selectedFile?.name === file.name ? null : file)
-            }
-            className={`cursor-pointer p-3 rounded-md border transition ${
-              selectedFile?.name === file.name
-                ? "bg-pink-100 border-pink-400 text-gray-900"
-                : "bg-white border-gray-300 hover:bg-gray-100 text-gray-900"
-            }`}
-          >
-            {file.title}
-          </li>
-        ))}
-        {files.length === 0 && <p>No {category} found.</p>}
-      </ul>
-
-      {/* Edit Form */}
-      {formData && selectedFile && (
-        <form className="space-y-4">
+        {/* Search Bar */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            🔍 Search Content
+          </label>
           <input
             type="text"
-            value={formData.title || ""}
-            onChange={(e) => handleFieldChange("title", e.target.value)}
-            placeholder="Title"
-            className="w-full px-4 py-2 border rounded-md text-gray-800"
+            placeholder="Search by title or filename..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full px-4 py-3 text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
           />
-          <input
-            type="text"
-            value={formData.authors?.join(", ") || ""}
-            onChange={(e) =>
-              handleFieldChange(
-                "authors",
-                e.target.value.split(",").map((a) => a.trim())
-              )
-            }
-            placeholder="Authors"
-            className="w-full px-4 py-2 border rounded-md text-gray-800"
-          />
+        </div>
 
-          <div>
-            <p className="font-medium mb-2 text-gray-900">Categories:</p>
-            <div className="flex flex-wrap gap-2">
-              {availableCategories.map((cat) => (
-                <label
-                  key={cat}
-                  onClick={() => toggleCategory(cat)}
-                  className={`px-3 py-1 border rounded-md cursor-pointer transition ${
-                    formData.categories?.includes(cat)
-                      ? "bg-pink-600 text-white border-pink-600"
-                      : "bg-gray-200 text-gray-800 border-gray-300 hover:bg-gray-300"
+        {/* File List */}
+        <div>
+          <p className="text-sm font-semibold text-gray-700 mb-3">
+            Select content to edit ({filteredFiles.length} items)
+          </p>
+          {loading ? (
+            <div className="text-center py-8">
+              <p className="text-gray-500">Loading {category}...</p>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {filteredFiles.map((file) => (
+                <button
+                  key={file.sha}
+                  onClick={() => setSelectedFile(selectedFile?.name === file.name ? null : file)}
+                  className={`w-full text-left p-4 rounded-lg border-2 transition-all ${
+                    selectedFile?.name === file.name
+                      ? "bg-pink-50 border-pink-400 shadow-md transform scale-102"
+                      : "bg-white border-gray-200 hover:border-pink-300 hover:bg-gray-50"
                   }`}
                 >
-                  {cat}
-                </label>
+                  <p className="font-medium text-gray-900">{file.title}</p>
+                  <p className="text-xs text-gray-500 mt-1">{file.name}</p>
+                </button>
               ))}
+              {filteredFiles.length === 0 && (
+                <p className="text-center py-8 text-gray-500">
+                  {searchQuery ? "No matching content found" : `No ${category} found`}
+                </p>
+              )}
             </div>
-          </div>
+          )}
+        </div>
 
-          <textarea
-            value={formData.synopsis || ""}
-            onChange={(e) => handleFieldChange("synopsis", e.target.value)}
-            placeholder="Synopsis"
-            className="w-full px-4 py-2 border rounded-md text-gray-800"
-          />
-          <input
-            type="text"
-            value={formData.thumbnail || ""}
-            onChange={(e) => handleFieldChange("thumbnail", e.target.value)}
-            placeholder="Thumbnail URL"
-            className="w-full px-4 py-2 border rounded-md text-gray-800"
-          />
+        {/* Edit Form */}
+        {formData && selectedFile && (
+          <div className="border-t pt-6 space-y-4">
+            <p className="text-sm font-semibold text-gray-700 mb-3">
+              📝 Edit Details
+            </p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Title
+                </label>
+                <input
+                  type="text"
+                  value={formData.title || ""}
+                  onChange={(e) => handleFieldChange("title", e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Authors
+                </label>
+                <input
+                  type="text"
+                  value={formData.authors?.join(", ") || ""}
+                  onChange={(e) =>
+                    handleFieldChange(
+                      "authors",
+                      e.target.value.split(",").map((a) => a.trim())
+                    )
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+                />
+              </div>
+            </div>
 
-          <div className="flex gap-3">
+            <div>
+              <p className="text-sm font-medium text-gray-700 mb-2">Categories</p>
+              <div className="flex flex-wrap gap-2">
+                {DISCOVERY_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => toggleCategory(cat)}
+                    className={`px-4 py-2 border-2 rounded-lg font-medium transition-all ${
+                      formData.categories?.includes(cat)
+                        ? "bg-pink-600 text-white border-pink-600"
+                        : "bg-white text-gray-700 border-gray-300 hover:border-pink-400"
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Synopsis
+              </label>
+              <textarea
+                value={formData.synopsis || ""}
+                onChange={(e) => handleFieldChange("synopsis", e.target.value)}
+                rows={4}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition resize-none"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Thumbnail URL
+                </label>
+                <input
+                  type="text"
+                  value={formData.thumbnail || ""}
+                  onChange={(e) => handleFieldChange("thumbnail", e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Content Link
+                </label>
+                <input
+                  type="text"
+                  value={formData.link || ""}
+                  onChange={(e) => handleFieldChange("link", e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+                />
+              </div>
+            </div>
+
             <button
               type="button"
               onClick={() => setShowConfirm(true)}
-              className="w-full py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700"
+              className="w-full py-3 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-lg font-semibold hover:shadow-lg hover:transform hover:scale-105 transition-all"
             >
-              Update
+              Save Changes
             </button>
           </div>
-        </form>
-      )}
+        )}
+
+        {message && <ResponseMessage message={message} />}
+      </div>
 
       {/* Confirmation Modal */}
       {showConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl max-w-md w-full p-6">
-            <h3 className="text-xl font-bold text-pink-600 mb-4">Confirm Update</h3>
-            <p className="mb-6">
-              Save changes to <strong>{selectedFile?.name}</strong>?
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={handleUpdate}
-                className="w-full py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700"
-              >
-                Yes, Save
-              </button>
-              <button
-                onClick={() => setShowConfirm(false)}
-                className="w-full py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmModal
+          title="Confirm Update"
+          message={`Save changes to "${selectedFile?.title || selectedFile?.name}"?`}
+          onConfirm={handleUpdate}
+          onCancel={() => setShowConfirm(false)}
+        />
       )}
-
-      {message && <ResponseMessage message={message} />}
-    </section>
+    </div>
   );
 }
 
@@ -837,36 +1023,38 @@ function RemoveForm() {
   const [message, setMessage] = useState<string | null>(null);
   const [confirmFile, setConfirmFile] = useState<FileItem | null>(null);
   const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
-    const fetchFiles = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/github/list-files?category=${category}`);
-        const filesData: FileItem[] = await res.json();
-
-        const filesWithTitles = await Promise.all(
-          filesData.map(async (file) => {
-            try {
-              const fileRes = await fetch(
-                `/api/github/get-file?path=${encodeURIComponent(file.path)}`
-              );
-              const data = await fileRes.json();
-              return { ...file, title: data.title || file.name };
-            } catch {
-              return { ...file, title: file.name };
-            }
-          })
-        );
-        setFiles(filesWithTitles);
-      } catch (err) {
-        setMessage("❌ Failed to load files");
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchFiles();
   }, [category]);
+
+  const fetchFiles = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/github/list-files?category=${category}`);
+      const filesData: FileItem[] = await res.json();
+
+      const filesWithTitles = await Promise.all(
+        filesData.map(async (file) => {
+          try {
+            const fileRes = await fetch(
+              `/api/github/get-file?path=${encodeURIComponent(file.path)}`
+            );
+            const data = await fileRes.json();
+            return { ...file, title: data.title || file.name };
+          } catch {
+            return { ...file, title: file.name };
+          }
+        })
+      );
+      setFiles(filesWithTitles);
+    } catch (err) {
+      setMessage("❌ Failed to load files");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleRemove = async (file: FileItem) => {
     setMessage(null);
@@ -882,8 +1070,9 @@ function RemoveForm() {
       });
       const data = await res.json();
       if (res.ok) {
-        setMessage(`✅ Removed ${file.title || file.name}`);
+        setMessage(`✅ Removed "${file.title || file.name}"`);
         setFiles(files.filter((f) => f.name !== file.name));
+        setTimeout(() => setMessage(null), 5000);
       } else {
         setMessage("❌ Remove failed: " + data.error);
       }
@@ -894,64 +1083,85 @@ function RemoveForm() {
     }
   };
 
+  const filteredFiles = files.filter(file => 
+    file.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    file.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
-    <section className="bg-white py-16 px-6 max-w-3xl mx-auto rounded-xl shadow-md border space-y-6">
-      <h2 className="text-2xl font-bold text-pink-600 mb-4 text-center">
-        Remove Content
-      </h2>
+    <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+      <div className="bg-gradient-to-r from-red-600 to-pink-600 p-6">
+        <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+          <span>🗑️</span> Remove Content
+        </h2>
+        <p className="text-red-100 mt-1">Delete books or videos from your library</p>
+      </div>
 
-      <CategoryToggle category={category} setCategory={setCategory} />
+      <div className="p-6 space-y-6">
+        <CategoryToggle category={category} setCategory={setCategory} />
 
-      {loading ? (
-        <p>Loading {category}...</p>
-      ) : (
-        <ul className="space-y-3">
-          {files.map((file) => (
-            <li
-              key={file.sha}
-              className="flex justify-between items-center border border-gray-200 p-3 rounded-md shadow-sm text-gray-800"
-            >
-              <span>{file.title || file.name}</span>
-              <button
-                onClick={() => setConfirmFile(file)}
-                className="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700"
+        {/* Search Bar */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            🔍 Search Content
+          </label>
+          <input
+            type="text"
+            placeholder="Search by title or filename..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full px-4 py-3 border text-gray-900 border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent transition"
+          />
+        </div>
+
+        {loading ? (
+          <div className="text-center py-8">
+            <p className="text-gray-500">Loading {category}...</p>
+          </div>
+        ) : (
+          <div className="space-y-3 max-h-96 overflow-y-auto">
+            {filteredFiles.map((file) => (
+              <div
+                key={file.sha}
+                className="flex justify-between items-center border-2 border-gray-200 p-4 rounded-lg hover:border-red-300 hover:bg-red-50 transition-all"
               >
-                Remove
-              </button>
-            </li>
-          ))}
-          {files.length === 0 && <p>No {category} found.</p>}
-        </ul>
-      )}
+                <div>
+                  <p className="font-semibold text-gray-900">{file.title || file.name}</p>
+                  <p className="text-xs text-gray-500 mt-1">{file.name}</p>
+                </div>
+                <button
+                  onClick={() => setConfirmFile(file)}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-medium"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            {filteredFiles.length === 0 && (
+              <div className="text-center py-12">
+                <p className="text-gray-500 text-lg">
+                  {searchQuery ? "No matching content found" : `No ${category} found`}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {message && <ResponseMessage message={message} />}
+      </div>
 
       {/* Confirmation Modal */}
       {confirmFile && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 text-gray-800">
-            <h3 className="text-xl font-bold text-pink-600 mb-4">Confirm Remove</h3>
-            <p className="mb-6">
-              Are you sure you want to remove <strong>{confirmFile.title || confirmFile.name}</strong>?
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => handleRemove(confirmFile)}
-                className="w-full py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
-              >
-                Yes, Remove
-              </button>
-              <button
-                onClick={() => setConfirmFile(null)}
-                className="w-full py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmModal
+          title="Confirm Removal"
+          message={`Are you sure you want to remove "${confirmFile.title || confirmFile.name}"? This action cannot be undone.`}
+          onConfirm={() => handleRemove(confirmFile)}
+          onCancel={() => setConfirmFile(null)}
+          confirmText="Yes, Remove"
+          isDangerous
+        />
       )}
-
-      {message && <ResponseMessage message={message} />}
-    </section>
+    </div>
   );
 }
 
@@ -964,18 +1174,19 @@ function CategoryToggle({
   setCategory: (cat: CategoryType) => void;
 }) {
   return (
-    <div className="flex justify-center gap-4 mb-6">
+    <div className="flex justify-center gap-3">
       {(["books", "videos"] as CategoryType[]).map((type) => (
         <button
           key={type}
+          type="button"
           onClick={() => setCategory(type)}
-          className={`px-4 py-2 rounded-md font-semibold transition ${
+          className={`px-6 py-3 rounded-lg font-semibold transition-all duration-200 ${
             category === type
-              ? "bg-pink-600 text-white"
-              : "bg-gray-200 text-gray-800 hover:bg-gray-300"
+              ? "bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-md transform scale-105"
+              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
           }`}
         >
-          {type.charAt(0).toUpperCase() + type.slice(1)}
+          {type === "books" ? "📚" : "🎥"} {type.charAt(0).toUpperCase() + type.slice(1)}
         </button>
       ))}
     </div>
@@ -991,20 +1202,21 @@ function CheckboxGroup({
 }) {
   return (
     <div>
-      <p className="font-medium mb-2 text-gray-900">Categories:</p>
+      <p className="text-sm font-semibold text-gray-700 mb-3">Categories</p>
       <div className="flex flex-wrap gap-2">
         {DISCOVERY_CATEGORIES.map((cat) => (
-          <label
+          <button
             key={cat}
+            type="button"
             onClick={() => toggle(cat)}
-            className={`px-3 py-1 border rounded-md cursor-pointer transition ${
+            className={`px-4 py-2 border-2 rounded-lg font-medium transition-all ${
               selected.includes(cat)
-                ? "bg-pink-600 text-white border-pink-600"
-                : "bg-gray-200 text-gray-800 border-gray-300 hover:bg-gray-300"
+                ? "bg-pink-600 text-white border-pink-600 shadow-sm"
+                : "bg-white text-gray-700 border-gray-300 hover:border-pink-400"
             }`}
           >
             {cat}
-          </label>
+          </button>
         ))}
       </div>
     </div>
@@ -1012,13 +1224,61 @@ function CheckboxGroup({
 }
 
 function ResponseMessage({ message }: { message: string }) {
+  const isSuccess = message.startsWith("✅");
   return (
-    <p
-      className={`mt-4 text-center font-medium ${
-        message.startsWith("✅") ? "text-green-600" : "text-red-500"
+    <div
+      className={`p-4 rounded-lg border-2 ${
+        isSuccess
+          ? "bg-green-50 border-green-300 text-green-800"
+          : "bg-red-50 border-red-300 text-red-800"
       }`}
     >
-      {message}
-    </p>
+      <p className="font-medium">{message}</p>
+    </div>
+  );
+}
+
+function ConfirmModal({
+  title,
+  message,
+  onConfirm,
+  onCancel,
+  confirmText = "Yes, Confirm",
+  isDangerous = false,
+}: {
+  title: string;
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  confirmText?: string;
+  isDangerous?: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl transform transition-all">
+        <h3 className={`text-2xl font-bold mb-4 ${isDangerous ? "text-red-600" : "text-pink-600"}`}>
+          {title}
+        </h3>
+        <p className="text-gray-700 mb-6 leading-relaxed">{message}</p>
+        <div className="flex gap-3">
+          <button
+            onClick={onConfirm}
+            className={`flex-1 py-3 rounded-lg font-semibold transition-all ${
+              isDangerous
+                ? "bg-red-600 hover:bg-red-700 text-white"
+                : "bg-gradient-to-r from-pink-600 to-purple-600 hover:shadow-lg text-white"
+            }`}
+          >
+            {confirmText}
+          </button>
+          <button
+            onClick={onCancel}
+            className="flex-1 py-3 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

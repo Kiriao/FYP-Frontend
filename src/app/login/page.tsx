@@ -202,7 +202,7 @@ export default function LoginPage() {
         {/* Footer Help Text */}
         <p className="text-center text-sm text-gray-500 mt-6">
           Need help? Contact our{" "}
-          <a href="/support" className="text-pink-600 hover:underline">
+          <a href="/contact" className="text-pink-600 hover:underline">
             support team
           </a>
         </p>
