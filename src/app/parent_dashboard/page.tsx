@@ -13,17 +13,20 @@ import {
   getDocs,
   doc,
   updateDoc,
+  deleteDoc,
   query,
   where,
   getDoc,
 } from "firebase/firestore";
-import { EyeIcon, EyeOffIcon } from "lucide-react";
+import { EyeIcon, EyeOffIcon, UserPlus, Key, Shield, LogOut, Trash2, Edit2, X } from "lucide-react";
 
 interface Child {
   id: string;
   fullName: string;
   email: string;
   restrictions?: string[];
+  createdAt?: any;
+  emailVerified?: boolean;
 }
 
 export default function ParentDashboardPage() {
@@ -32,28 +35,30 @@ export default function ParentDashboardPage() {
   const [role, setRole] = useState<string | null>(null);
   const [children, setChildren] = useState<Child[]>([]);
   const [selectedChild, setSelectedChild] = useState<Child | null>(null);
+  const [activeTab, setActiveTab] = useState<"add">("add");
 
+  // Add child form
   const [childName, setChildName] = useState("");
   const [childEmail, setChildEmail] = useState("");
   const [childPassword, setChildPassword] = useState("");
   const [showChildPassword, setShowChildPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Update child form
   const [childNewPassword, setChildNewPassword] = useState("");
   const [showChildNewPassword, setShowChildNewPassword] = useState(false);
   const [childRestrictions, setChildRestrictions] = useState("");
+  const [editingChild, setEditingChild] = useState<string | null>(null);
 
+  // Parent settings
   const [parentNewPassword, setParentNewPassword] = useState("");
   const [showParentNewPassword, setShowParentNewPassword] = useState(false);
   const [parentConfirmNewPassword, setParentConfirmNewPassword] = useState("");
-  const [showParentConfirmNewPassword, setShowParentConfirmNewPassword] =
-    useState(false);
+  const [showParentConfirmNewPassword, setShowParentConfirmNewPassword] = useState(false);
   const [passwordError, setPasswordError] = useState("");
 
   const router = useRouter();
 
-  // -----------------------
-  // Auth check
-  // -----------------------
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
@@ -79,86 +84,75 @@ export default function ParentDashboardPage() {
         return;
       }
 
-      await fetchChildren(currentUser.uid);
+      await fetchChilds(currentUser.uid);
       setLoading(false);
     });
 
     return () => unsubscribe();
   }, [router]);
 
-  // -----------------------
-  // Fetch children by parentId
-  // -----------------------
-  const fetchChildren = async (parentId: string) => {
+  const fetchChilds = async (parentId: string) => {
     const q = query(
       collection(db, "users"),
       where("parentId", "==", parentId)
     );
     const snapshot = await getDocs(q);
 
-    const childrenData: Child[] = snapshot.docs.map((docSnap) => ({
+    const childData: Child[] = snapshot.docs.map((docSnap) => ({
       id: docSnap.id,
       ...docSnap.data(),
     })) as Child[];
 
-    setChildren(childrenData);
-    if (childrenData.length > 0) {
-      setSelectedChild(childrenData[0]);
-      setChildRestrictions(childrenData[0].restrictions?.join(", ") || "");
+    setChildren(childData);
+    if (childData.length > 0 && !selectedChild) {
+      setSelectedChild(childData[0]);
+      setChildRestrictions(childData[0].restrictions?.join(", ") || "");
     }
   };
 
-// -----------------------
-// Add child
-// -----------------------
-const handleAddChild = async (e: React.FormEvent) => {
-  e.preventDefault();
-  if (!user) return;
+  const handleAddChild = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
 
-  try {
-    const res = await fetch("/api/create-child", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        parentId: user.uid,
-        childName,
-        childEmail,
-        childPassword,
-      }),
-    });
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/create-child", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parentId: user.uid,
+          childName,
+          childEmail,
+          childPassword,
+        }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (data.success) {
-      alert(
-        "Child added successfully! Verification email sent. Make sure your child checks their inbox."
-      );
-
-      // Reset form
-      setChildName("");
-      setChildEmail("");
-      setChildPassword("");
-      setShowChildPassword(false);
-
-      // Refresh children list from Firestore
-      await fetchChildren(user.uid);
-    } else {
-      alert("Error: " + data.error);
+      if (data.success) {
+        alert("Child added successfully! Verification email sent.");
+        setChildName("");
+        setChildEmail("");
+        setChildPassword("");
+        setShowChildPassword(false);
+        await fetchChilds(user.uid);
+        
+      } else {
+        alert("Error: " + data.error);
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message);
+    } finally {
+      setIsSubmitting(false);
     }
-  } catch (err: any) {
-    console.error(err);
-    alert(err.message);
-  }
-};
+  };
 
-
-  // -----------------------
-  // Update child password
-  // -----------------------
   const handleUpdateChildPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedChild || !childNewPassword || !user) return;
 
+    setIsSubmitting(true);
     try {
       const res = await fetch("/api/update-child-password", {
         method: "POST",
@@ -181,15 +175,13 @@ const handleAddChild = async (e: React.FormEvent) => {
     } catch (err: any) {
       console.error(err);
       alert(err.message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // -----------------------
-  // Update child restrictions
-  // -----------------------
-  const handleUpdateChildRestrictions = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedChild || !user) return;
+  const handleUpdateChildRestrictions = async (childId: string) => {
+    if (!user) return;
 
     try {
       const restrictionsArray = childRestrictions
@@ -197,20 +189,23 @@ const handleAddChild = async (e: React.FormEvent) => {
         .map((r) => r.trim())
         .filter(Boolean);
 
-      await updateDoc(doc(db, "users", selectedChild.id), {
+      await updateDoc(doc(db, "users", childId), {
         restrictions: restrictionsArray,
       });
 
       setChildren((prev) =>
-        prev.map((c) =>
-          c.id === selectedChild.id ? { ...c, restrictions: restrictionsArray } : c
+        prev.map((s) =>
+          s.id === childId ? { ...s, restrictions: restrictionsArray } : s
         )
       );
 
-      setSelectedChild((prev) =>
-        prev ? { ...prev, restrictions: restrictionsArray } : null
-      );
+      if (selectedChild?.id === childId) {
+        setSelectedChild((prev) =>
+          prev ? { ...prev, restrictions: restrictionsArray } : null
+        );
+      }
 
+      setEditingChild(null);
       alert("Restrictions updated!");
     } catch (err: any) {
       console.error(err);
@@ -218,18 +213,39 @@ const handleAddChild = async (e: React.FormEvent) => {
     }
   };
 
-  // -----------------------
-  // Parent change password
-  // -----------------------
+  const handleDeleteChild = async (childId: string) => {
+    if (!confirm("Are you sure you want to delete this child? This action cannot be undone.")) {
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, "users", childId));
+      setChildren((prev) => prev.filter((s) => s.id !== childId));
+      if (selectedChild?.id === childId) {
+        setSelectedChild(null);
+      }
+      alert("Child deleted successfully!");
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message);
+    }
+  };
+
   const handleParentChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+
+    if (parentNewPassword.length < 6) {
+      setPasswordError("Password must be at least 6 characters");
+      return;
+    }
 
     if (parentNewPassword !== parentConfirmNewPassword) {
       setPasswordError("Passwords do not match");
       return;
     }
 
+    setIsSubmitting(true);
     try {
       await updatePassword(user, parentNewPassword);
       alert("Password updated successfully!");
@@ -241,142 +257,134 @@ const handleAddChild = async (e: React.FormEvent) => {
     } catch (err: any) {
       console.error(err);
       alert(err.message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  if (loading) return <p className="text-center mt-20">Loading...</p>;
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 flex items-center justify-center">
+        <div className="animate-pulse text-pink-600 text-xl font-semibold">Loading...</div>
+      </div>
+    );
+  }
+
   if (!user || role !== "parent") return null;
 
   return (
-    <section className="bg-white py-20 px-6">
-      <div className="max-w-md mx-auto">
-        <h1 className="text-4xl font-bold text-pink-600 mb-6 text-center">
-          Parent Dashboard
-        </h1>
-        <p className="text-gray-700 mb-6 text-center">
-          Welcome {user.displayName || user.email}! Add and manage your children.
-        </p>
-
-        {/* Add Child Form */}
-        <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200 mb-6">
-          <h2 className="text-xl font-semibold text-pink-600 mb-4">Add Child</h2>
-          <form onSubmit={handleAddChild} className="flex flex-col gap-3">
-            <input
-              type="text"
-              placeholder="Child's Name"
-              value={childName}
-              onChange={(e) => setChildName(e.target.value)}
-              required
-              className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-pink-400 focus:border-pink-400"
-            />
-            <input
-              type="email"
-              placeholder="Child's Email"
-              value={childEmail}
-              onChange={(e) => setChildEmail(e.target.value)}
-              required
-              className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-pink-400 focus:border-pink-400"
-            />
-            <div className="relative">
-              <input
-                type={showChildPassword ? "text" : "password"}
-                placeholder="Child's Password"
-                value={childPassword}
-                onChange={(e) => setChildPassword(e.target.value)}
-                required
-                className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-pink-400 focus:border-pink-400"
-              />
-              <button
-                type="button"
-                className="absolute right-3 top-2 text-gray-500"
-                onClick={() => setShowChildPassword(!showChildPassword)}
-              >
-                {showChildPassword ? <EyeOffIcon size={20} /> : <EyeIcon size={20} />}
-              </button>
+    <section className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 py-8 px-4">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-pink-600 mb-2">
+                Parent Dashboard
+              </h1>
+              <p className="text-gray-600">
+                Welcome, {user.displayName || user.email}
+              </p>
             </div>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-pink-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-600 text-sm font-medium">Total Children</p>
+                <p className="text-3xl font-bold text-pink-600">{children.length}</p>
+              </div>
+              <UserPlus className="text-pink-500" size={40} />
+            </div>
+          </div>
+        </div>
+
+        {/* Navigation Tabs */}
+        <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+          <div className="flex border-b border-gray-200">
             <button
-              type="submit"
-              className="w-full py-2 bg-pink-600 text-white rounded-md font-semibold hover:bg-pink-700 transition"
+              onClick={() => setActiveTab("add")}
+              className={`flex-1 py-4 px-6 font-semibold transition ${
+                activeTab === "add"
+                  ? "bg-pink-500 text-white"
+                  : "bg-white text-gray-600 hover:bg-gray-50"
+              }`}
             >
               Add Child
             </button>
-          </form>
-        </div>
 
-        {/* Children Selector & Dashboard */}
-{/*         {children.length > 0 && (
-          <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200 mb-6">
-            <h2 className="text-xl font-semibold text-pink-600 mb-4">Select Child</h2>
-            <select
-              value={selectedChild?.id || ""}
-              onChange={(e) => {
-                const child = children.find((c) => c.id === e.target.value) || null;
-                setSelectedChild(child);
-                setChildRestrictions(child?.restrictions?.join(", ") || "");
-                setChildNewPassword("");
-                setShowChildNewPassword(false);
-              }}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-pink-400 focus:border-pink-400"
-            >
-              <option value="">-- Choose a Child --</option>
-              {children.map((child) => (
-                <option key={child.id} value={child.id}> 
-                  {child.fullName}
-                </option>
-              ))}
-            </select>
+          </div>
 
-            {selectedChild && (
-              <div className="mt-4 p-4 border border-gray-300 rounded-md text-gray-900 bg-gray-50">
-                <h3 className="text-lg font-semibold text-pink-600">
-                  {selectedChild.fullName}'s Dashboard
-                </h3>
-                <p>Email: {selectedChild.email}</p>
-                <p>
-                  Restrictions:{" "}
-                  {selectedChild.restrictions?.length
-                    ? selectedChild.restrictions.join(", ")
-                    : "None"}
-                </p> */}
-
-                {/* Update Child Password */}
-{/*                 <form onSubmit={handleUpdateChildPassword} className="flex flex-col gap-3 mt-3 relative">
-                  <input
-                    type={showChildNewPassword ? "text" : "password"}
-                    placeholder="New Password"
-                    value={childNewPassword}
-                    onChange={(e) => setChildNewPassword(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-pink-400 focus:border-pink-400"
-                  />
+          <div className="p-6">
+            {/* Add Child Tab */}
+            {activeTab === "add" && (
+              <div className="max-w-2xl mx-auto">
+                <h2 className="text-2xl font-bold text-gray-800 mb-6">Add New Child</h2>
+                <form onSubmit={handleAddChild} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Child's Full Name
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Enter full name"
+                      value={childName}
+                      onChange={(e) => setChildName(e.target.value)}
+                      required
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Child's Email
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="child@example.com"
+                      value={childEmail}
+                      onChange={(e) => setChildEmail(e.target.value)}
+                      required
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Child's Password
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showChildPassword ? "text" : "password"}
+                        placeholder="Minimum 6 characters"
+                        value={childPassword}
+                        onChange={(e) => setChildPassword(e.target.value)}
+                        required
+                        minLength={6}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent"
+                      />
+                      <button
+                        type="button"
+                        className="absolute right-3 top-3.5 text-gray-500 hover:text-gray-700"
+                        onClick={() => setShowChildPassword(!showChildPassword)}
+                      >
+                        {showChildPassword ? <EyeOffIcon size={20} /> : <EyeIcon size={20} />}
+                      </button>
+                    </div>
+                  </div>
                   <button
-                    type="button"
-                    className="absolute right-3 top-2 text-gray-500"
-                    onClick={() => setShowChildNewPassword(!showChildNewPassword)}
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-3 bg-pink-600 text-white rounded-lg font-semibold hover:bg-pink-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {showChildNewPassword ? <EyeOffIcon size={20} /> : <EyeIcon size={20} />}
+                    {isSubmitting ? "Adding..." : "Add Child"}
                   </button>
-                  <button type="submit" className="w-full py-2 bg-pink-600 text-white rounded-md font-semibold hover:bg-pink-700 transition">
-                    Update Child Password
-                  </button>
-                </form> */}
-
-                {/* Update Child Restrictions */}
-{/*                 <form onSubmit={handleUpdateChildRestrictions} className="flex flex-col gap-3 mt-3">
-                  <input
-                    type="text"
-                    value={childRestrictions}
-                    onChange={(e) => setChildRestrictions(e.target.value)}
-                    placeholder="Restrictions (comma separated)"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-pink-400 focus:border-pink-400"
-                  />
-                  <button type="submit" className="w-full py-2 bg-pink-600 text-white rounded-md font-semibold hover:bg-pink-700 transition">
-                    Update Restrictions
-                  </button>
-                </form> */}
-{/*               </div>
+                </form>
+              </div>
             )}
           </div>
-        )} */}
+        </div>
       </div>
     </section>
   );

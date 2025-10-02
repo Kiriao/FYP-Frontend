@@ -35,7 +35,7 @@ export default function EducatorDashboardPage() {
   const [role, setRole] = useState<string | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [activeTab, setActiveTab] = useState<"add" | "manage" | "settings">("add");
+  const [activeTab, setActiveTab] = useState<"add">("add");
 
   // Add student form
   const [studentName, setStudentName] = useState("");
@@ -136,7 +136,6 @@ export default function EducatorDashboardPage() {
         setStudentPassword("");
         setShowStudentPassword(false);
         await fetchStudents(user.uid);
-        setActiveTab("manage");
       } else {
         alert("Error: " + data.error);
       }
@@ -300,28 +299,6 @@ export default function EducatorDashboardPage() {
               <UserPlus className="text-pink-500" size={40} />
             </div>
           </div>
-          <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-purple-500">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-600 text-sm font-medium">Verified Students</p>
-                <p className="text-3xl font-bold text-purple-600">
-                  {students.filter((s) => s.emailVerified).length}
-                </p>
-              </div>
-              <Shield className="text-purple-500" size={40} />
-            </div>
-          </div>
-          <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-blue-500">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-600 text-sm font-medium">With Restrictions</p>
-                <p className="text-3xl font-bold text-blue-600">
-                  {students.filter((s) => s.restrictions && s.restrictions.length > 0).length}
-                </p>
-              </div>
-              <Key className="text-blue-500" size={40} />
-            </div>
-          </div>
         </div>
 
         {/* Navigation Tabs */}
@@ -336,26 +313,6 @@ export default function EducatorDashboardPage() {
               }`}
             >
               Add Student
-            </button>
-            <button
-              onClick={() => setActiveTab("manage")}
-              className={`flex-1 py-4 px-6 font-semibold transition ${
-                activeTab === "manage"
-                  ? "bg-pink-500 text-white"
-                  : "bg-white text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              Manage Students ({students.length})
-            </button>
-            <button
-              onClick={() => setActiveTab("settings")}
-              className={`flex-1 py-4 px-6 font-semibold transition ${
-                activeTab === "settings"
-                  ? "bg-pink-500 text-white"
-                  : "bg-white text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              Settings
             </button>
           </div>
 
@@ -425,200 +382,7 @@ export default function EducatorDashboardPage() {
               </div>
             )}
 
-            {/* Manage Students Tab */}
-            {activeTab === "manage" && (
-              <div>
-                <h2 className="text-2xl font-bold text-gray-800 mb-6">Manage Students</h2>
-                {students.length === 0 ? (
-                  <div className="text-center py-12">
-                    <UserPlus className="mx-auto mb-4 text-gray-400" size={64} />
-                    <p className="text-gray-600 text-lg">No students yet</p>
-                    <p className="text-gray-500 mt-2">Add your first student to get started</p>
-                    <button
-                      onClick={() => setActiveTab("add")}
-                      className="mt-4 px-6 py-2 bg-pink-600 text-white rounded-lg font-semibold hover:bg-pink-700 transition"
-                    >
-                      Add Student
-                    </button>
-                  </div>
-                ) : (
-                  <div className="grid gap-4">
-                    {students.map((student) => (
-                      <div
-                        key={student.id}
-                        className="bg-gray-50 rounded-xl p-6 border border-gray-200 hover:shadow-md transition"
-                      >
-                        <div className="flex items-start justify-between mb-4">
-                          <div className="flex-1">
-                            <h3 className="text-xl font-semibold text-gray-800 mb-1">
-                              {student.fullName}
-                            </h3>
-                            <p className="text-gray-600">{student.email}</p>
-                            <div className="flex gap-2 mt-2">
-                              <span
-                                className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
-                                  student.emailVerified
-                                    ? "bg-green-100 text-green-700"
-                                    : "bg-yellow-100 text-yellow-700"
-                                }`}
-                              >
-                                {student.emailVerified ? "Verified" : "Pending Verification"}
-                              </span>
-                              {student.restrictions && student.restrictions.length > 0 && (
-                                <span className="inline-block px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
-                                  {student.restrictions.length} Restriction(s)
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => handleDeleteStudent(student.id)}
-                            className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition"
-                            title="Delete student"
-                          >
-                            <Trash2 size={20} />
-                          </button>
-                        </div>
-
-                        {/* Restrictions Section */}
-                        <div className="mt-4">
-                          <div className="flex items-center justify-between mb-2">
-                            <label className="text-sm font-medium text-gray-700">
-                              Restrictions (comma-separated)
-                            </label>
-                            {editingStudent === student.id ? (
-                              <button
-                                onClick={() => setEditingStudent(null)}
-                                className="text-gray-500 hover:text-gray-700"
-                              >
-                                <X size={18} />
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => {
-                                  setEditingStudent(student.id);
-                                  setStudentRestrictions(student.restrictions?.join(", ") || "");
-                                  setSelectedStudent(student);
-                                }}
-                                className="flex items-center gap-1 text-pink-600 hover:text-pink-700 text-sm font-medium"
-                              >
-                                <Edit2 size={14} />
-                                Edit
-                              </button>
-                            )}
-                          </div>
-                          {editingStudent === student.id ? (
-                            <div className="flex gap-2">
-                              <input
-                                type="text"
-                                placeholder="e.g., peanuts, dairy, shellfish"
-                                value={studentRestrictions}
-                                onChange={(e) => setStudentRestrictions(e.target.value)}
-                                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-pink-400"
-                              />
-                              <button
-                                onClick={() => handleUpdateStudentRestrictions(student.id)}
-                                className="px-4 py-2 bg-pink-600 text-white rounded-lg font-semibold hover:bg-pink-700 transition"
-                              >
-                                Save
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-700">
-                              {student.restrictions && student.restrictions.length > 0
-                                ? student.restrictions.join(", ")
-                                : "No restrictions set"}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Settings Tab */}
-            {activeTab === "settings" && (
-              <div className="max-w-2xl mx-auto">
-                <h2 className="text-2xl font-bold text-gray-800 mb-6">Account Settings</h2>
-                <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-800 mb-4">
-                    Change Your Password
-                  </h3>
-                  <form onSubmit={handleEducatorChangePassword} className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        New Password
-                      </label>
-                      <div className="relative">
-                        <input
-                          type={showEducatorNewPassword ? "text" : "password"}
-                          placeholder="Minimum 6 characters"
-                          value={educatorNewPassword}
-                          onChange={(e) => {
-                            setEducatorNewPassword(e.target.value);
-                            setPasswordError("");
-                          }}
-                          required
-                          minLength={6}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent"
-                        />
-                        <button
-                          type="button"
-                          className="absolute right-3 top-3.5 text-gray-500 hover:text-gray-700"
-                          onClick={() => setShowEducatorNewPassword(!showEducatorNewPassword)}
-                        >
-                          {showEducatorNewPassword ? <EyeOffIcon size={20} /> : <EyeIcon size={20} />}
-                        </button>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Confirm New Password
-                      </label>
-                      <div className="relative">
-                        <input
-                          type={showEducatorConfirmNewPassword ? "text" : "password"}
-                          placeholder="Re-enter password"
-                          value={educatorConfirmNewPassword}
-                          onChange={(e) => {
-                            setEducatorConfirmNewPassword(e.target.value);
-                            setPasswordError("");
-                          }}
-                          required
-                          minLength={6}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent"
-                        />
-                        <button
-                          type="button"
-                          className="absolute right-3 top-3.5 text-gray-500 hover:text-gray-700"
-                          onClick={() =>
-                            setShowEducatorConfirmNewPassword(!showEducatorConfirmNewPassword)
-                          }
-                        >
-                          {showEducatorConfirmNewPassword ? (
-                            <EyeOffIcon size={20} />
-                          ) : (
-                            <EyeIcon size={20} />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                    {passwordError && (
-                      <p className="text-red-600 text-sm">{passwordError}</p>
-                    )}
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      className="w-full py-3 bg-pink-600 text-white rounded-lg font-semibold hover:bg-pink-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isSubmitting ? "Updating..." : "Update Password"}
-                    </button>
-                  </form>
-                </div>
-              </div>
-            )}
+            
           </div>
         </div>
       </div>
