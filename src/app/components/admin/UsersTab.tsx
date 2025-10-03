@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { useState, useEffect } from 'react';
+import { updateDoc, doc, deleteDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { 
   Search, 
@@ -33,17 +33,41 @@ interface UsersTabProps {
   setUsers: React.Dispatch<React.SetStateAction<UserData[]>>;
 }
 
+interface PlanOption {
+  id: string;
+  name: string;
+}
+
 export default function UsersTab({ users, setUsers }: UsersTabProps) {
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterRole, setFilterRole] = useState("all");
   const [filterPlan, setFilterPlan] = useState("all");
+  const [plans, setPlans] = useState<PlanOption[]>([]);
   const [editForm, setEditForm] = useState({
     fullName: "",
     email: "",
     role: "",
     plan: ""
   });
+
+  // Fetch plans from Firebase
+  useEffect(() => {
+    const fetchPlans = async () => {
+      try {
+        const plansSnapshot = await getDocs(collection(db, "plans"));
+        const plansData = plansSnapshot.docs.map(doc => ({
+          id: doc.id,
+          name: doc.data().name
+        }));
+        setPlans(plansData);
+      } catch (error) {
+        console.error("Error fetching plans:", error);
+      }
+    };
+
+    fetchPlans();
+  }, []);
 
   // Helper function to safely convert timestamp to date
   const getDateFromTimestamp = (timestamp: any): Date | null => {
@@ -93,7 +117,7 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
       fullName: user.fullName,
       email: user.email,
       role: user.role || "user",
-      plan: user.plan || "Free Plan"
+      plan: user.plan || (plans.length > 0 ? plans[0].name : "Free Plan")
     });
   };
 
@@ -191,6 +215,9 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
     );
   };
 
+  // Get unique plan names from users for filter dropdown
+  const uniquePlans = Array.from(new Set(users.map(u => u.plan).filter(Boolean)));
+
   const stats = {
     total: users.length,
     active: users.filter(u => u.role !== "inactive").length,
@@ -276,10 +303,9 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent appearance-none bg-white"
             >
               <option value="all">All Plans</option>
-              <option value="Free Plan">Free Plan</option>
-              <option value="Starter Plan">Starter Plan</option>
-              <option value="Mid-Tier Plan">Mid-Tier Plan</option>
-              <option value="Premium Plan">Premium Plan</option>
+              {uniquePlans.map(plan => (
+                <option key={plan} value={plan}>{plan}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -455,10 +481,18 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
                   onChange={(e) => setEditForm({ ...editForm, plan: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
                 >
-                  <option value="Free Plan">Free Plan</option>
-                  <option value="Starter Plan">Starter Plan</option>
-                  <option value="Mid-Tier Plan">Mid-Tier Plan</option>
-                  <option value="Premium Plan">Premium Plan</option>
+                  {plans.length > 0 ? (
+                    plans.map(plan => (
+                      <option key={plan.id} value={plan.name}>{plan.name}</option>
+                    ))
+                  ) : (
+                    <>
+                      <option value="Free Plan">Free Plan</option>
+                      <option value="Starter Plan">Starter Plan</option>
+                      <option value="Mid-Tier Plan">Mid-Tier Plan</option>
+                      <option value="Premium Plan">Premium Plan</option>
+                    </>
+                  )}
                 </select>
               </div>
             </div>
