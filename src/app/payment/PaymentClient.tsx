@@ -1,6 +1,7 @@
 'use client';
 
 import { useSearchParams, useRouter } from "next/navigation";
+import { query, where, getDocs, Timestamp } from "firebase/firestore";
 import { useState, useEffect, useCallback } from "react";
 import { auth, db } from "@/lib/firebase";
 import { doc, updateDoc, getDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
@@ -9,6 +10,17 @@ interface PlanInfo {
   name: string;
   price: number;
   id: string;
+}
+
+interface PromoCode {
+  code: string;
+  discountType: 'percentage' | 'fixed';
+  discountValue: number;
+  isActive: boolean;
+  expiresAt?: Timestamp | null;
+  usageLimit?: number;
+  usedCount?: number;
+  minPurchase?: number;
 }
 
 type PaymentMethod = "Credit/Debit Card" | "PayNow QR Code";
@@ -24,6 +36,15 @@ export default function PaymentClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
+
+  // Promo code states
+  const [promoCode, setPromoCode] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState<PromoCode | null>(null);
+  const [promoError, setPromoError] = useState("");
+  const [promoLoading, setPromoLoading] = useState(false);
+  const [discount, setDiscount] = useState(0);
+  const [finalPrice, setFinalPrice] = useState(0);
+  const [promoDocId, setPromoDocId] = useState<string | null>(null);
 
   // Card details
   const [cardName, setCardName] = useState("");
@@ -47,6 +68,23 @@ export default function PaymentClient() {
     "Free Plan": "/qr/free.png",
     "Unknown Plan": "/qr/free.png",
   };
+
+  // Calculate final price based on promo
+  useEffect(() => {
+    if (planInfo && appliedPromo) {
+      let discountAmount = 0;
+      if (appliedPromo.discountType === 'percentage') {
+        discountAmount = (planInfo.price * appliedPromo.discountValue) / 100;
+      } else {
+        discountAmount = appliedPromo.discountValue;
+      }
+      setDiscount(discountAmount);
+      setFinalPrice(Math.max(0, planInfo.price - discountAmount));
+    } else if (planInfo) {
+      setDiscount(0);
+      setFinalPrice(planInfo.price);
+    }
+  }, [planInfo, appliedPromo]);
 
   // Fetch plan details
   const fetchPlanDetails = useCallback(async () => {
@@ -82,11 +120,85 @@ export default function PaymentClient() {
     fetchPlanDetails();
   }, [fetchPlanDetails]);
 
+  // Apply promo code
+const handleApplyPromo = async () => {
+  if (!promoCode.trim()) {
+    setPromoError("Please enter a promo code");
+    return;
+  }
+
+  setPromoLoading(true);
+  setPromoError("");
+
+  try {
+    // Query the promoCodes collection by the 'code' field
+    const promoQuery = query(
+      collection(db, "promoCodes"), 
+      where("code", "==", promoCode.toUpperCase())
+    );
+    const promoSnap = await getDocs(promoQuery);
+
+    if (promoSnap.empty) {
+      throw new Error("Invalid promo code");
+    }
+
+    const promoDoc = promoSnap.docs[0];
+    const promoData = promoDoc.data() as PromoCode;
+
+    // Validate promo code
+    if (!promoData.isActive) {
+      throw new Error("This promo code is no longer active");
+    }
+
+    if (promoData.expiresAt) {
+      // Handle Firestore Timestamp - check if toDate method exists
+      const expiryDate = (promoData.expiresAt as any).toDate 
+        ? (promoData.expiresAt as any).toDate() 
+        : new Date(promoData.expiresAt as any);
+      
+      if (expiryDate < new Date()) {
+        throw new Error("This promo code has expired");
+      }
+    }
+
+    if (promoData.usageLimit && promoData.usedCount && promoData.usedCount >= promoData.usageLimit) {
+      throw new Error("This promo code has reached its usage limit");
+    }
+
+    if (promoData.minPurchase && planInfo && planInfo.price < promoData.minPurchase) {
+      throw new Error(`This promo code requires a minimum purchase of $${promoData.minPurchase.toFixed(2)}`);
+    }
+
+    // Apply the promo code (store the document ID too)
+    setAppliedPromo({
+      ...promoData,
+      code: promoCode.toUpperCase()
+    });
+    setPromoDocId(promoDoc.id); 
+    
+  } catch (err: any) {
+    console.error("Promo code error:", err);
+    setPromoError(err.message || "Failed to apply promo code");
+    setAppliedPromo(null);
+  } finally {
+    setPromoLoading(false);
+  }
+};
+
+  // Remove promo code
+  const handleRemovePromo = () => {
+    setAppliedPromo(null);
+    setPromoCode("");
+    setPromoError("");
+    setDiscount(0);
+    setPromoDocId(null); 
+  };
+
   // Format card number with spaces
   const formatCardNumber = (value: string) => {
     const cleaned = value.replace(/\s/g, "");
     const formatted = cleaned.match(/.{1,4}/g)?.join(" ") || cleaned;
-    return formatted.substring(0, 19); // Max 16 digits + 3 spaces
+    return formatted.substring(0, 19);
   };
 
   // Format expiry date
@@ -113,7 +225,6 @@ export default function PaymentClient() {
     if (cleaned.length < 13 || cleaned.length > 19) return "Invalid card number length";
     if (!/^\d+$/.test(cleaned)) return "Card number must contain only digits";
     
-    // Basic Luhn check
     let sum = 0;
     let isEven = false;
     for (let i = cleaned.length - 1; i >= 0; i--) {
@@ -220,7 +331,6 @@ export default function PaymentClient() {
         throw new Error("Plan information not available");
       }
 
-      // Calculate expiration date (30 days from now)
       const currentDate = new Date();
       const expirationDate = new Date(currentDate.getTime() + (30 * 24 * 60 * 60 * 1000));
 
@@ -240,21 +350,41 @@ export default function PaymentClient() {
         userEmail: user.email,
         planId: planInfo.id,
         planName: planInfo.name,
-        amount: planInfo.price,
+        amount: finalPrice,
+        originalAmount: planInfo.price,
+        discount: discount,
+        promoCode: appliedPromo?.code || null,
         paymentMethod: selectedMethod,
         status: "completed",
         createdAt: serverTimestamp(),
         expiresAt: expirationDate,
-        // Don't store actual card details for security
         cardLast4: selectedMethod === "Credit/Debit Card" 
           ? cardNumber.replace(/\s/g, "").slice(-4) 
           : null,
       });
 
+      // Update promo code usage if applied
+if (appliedPromo && promoDocId) {
+  try {
+    const promoDocRef = doc(db, "promoCodes", promoDocId);
+    const promoDocSnap = await getDoc(promoDocRef);
+    
+    if (promoDocSnap.exists()) {
+      const currentUsed = promoDocSnap.data().usedCount || 0;
+      await updateDoc(promoDocRef, {
+        usedCount: currentUsed + 1
+      });
+    }
+  } catch (promoError) {
+    console.error("Failed to update promo usage:", promoError);
+    // Don't fail the payment if promo update fails
+  }
+}
+
       // Update subscription record
       await updateDoc(userRef, {
         lastPaymentDate: serverTimestamp(),
-        lastPaymentAmount: planInfo.price,
+        lastPaymentAmount: finalPrice,
         lastPaymentMethod: selectedMethod,
       });
 
@@ -267,12 +397,13 @@ export default function PaymentClient() {
             email: user.email,
             plan: planInfo.name,
             method: selectedMethod,
-            amount: planInfo.price,
+            amount: finalPrice,
+            discount: discount,
+            promoCode: appliedPromo?.code,
           }),
         });
       } catch (emailError) {
         console.error("Email notification failed:", emailError);
-        // Don't fail the payment if email fails
       }
 
       alert(`✅ Payment successful! Your ${planInfo.name} subscription is now active for 30 days.`);
@@ -377,10 +508,36 @@ export default function PaymentClient() {
                     <span className="text-gray-600">Duration:</span>
                     <span className="font-semibold text-gray-800">30 days</span>
                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Original Price:</span>
+                    <span className={`font-semibold ${appliedPromo ? 'line-through text-gray-500' : 'text-gray-800'}`}>
+                      ${planInfo?.price.toFixed(2)}
+                    </span>
+                  </div>
+                  
+                  {appliedPromo && (
+                    <>
+                      <div className="flex justify-between text-green-600">
+                        <span className="font-semibold">Discount:</span>
+                        <span className="font-semibold">-${discount.toFixed(2)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs bg-green-50 px-2 py-1 rounded">
+                        <span className="font-semibold text-green-700">
+                          {appliedPromo.code}
+                        </span>
+                        <span className="text-green-600">
+                          {appliedPromo.discountType === 'percentage' 
+                            ? `${appliedPromo.discountValue}% off` 
+                            : `$${appliedPromo.discountValue} off`}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                  
                   <div className="border-t pt-2 mt-2 flex justify-between">
                     <span className="text-gray-800 font-bold">Total:</span>
                     <span className="text-2xl font-bold text-green-600">
-                      ${planInfo?.price.toFixed(2)}
+                      ${finalPrice.toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -414,6 +571,55 @@ export default function PaymentClient() {
                     <p className="text-red-700 text-sm">{error}</p>
                   </div>
                 )}
+
+                {/* Promo Code Section */}
+                <div className="mb-6 p-5 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl border-2 border-purple-200">
+                  <h3 className="font-bold text-gray-800 mb-3 flex items-center">
+                    <span className="text-xl mr-2">🎟️</span>
+                    Have a Promo Code?
+                  </h3>
+                  
+                  {!appliedPromo ? (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={promoCode}
+                        onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                        placeholder="Enter code"
+                        className="flex-1 border-2 border-gray-300 px-4 py-2 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500 uppercase"
+                        disabled={promoLoading}
+                      />
+                      <button
+                        onClick={handleApplyPromo}
+                        disabled={promoLoading || !promoCode.trim()}
+                        className="px-6 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {promoLoading ? "..." : "Apply"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between bg-white px-4 py-3 rounded-lg border-2 border-green-300">
+                      <div>
+                        <p className="font-bold text-green-700">{appliedPromo.code}</p>
+                        <p className="text-sm text-green-600">
+                          {appliedPromo.discountType === 'percentage' 
+                            ? `${appliedPromo.discountValue}% discount applied` 
+                            : `$${appliedPromo.discountValue} discount applied`}
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleRemovePromo}
+                        className="text-red-600 hover:text-red-700 font-semibold text-sm"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                  
+                  {promoError && (
+                    <p className="text-red-600 text-sm mt-2">{promoError}</p>
+                  )}
+                </div>
 
                 {/* Credit Card Form */}
                 {selectedMethod === "Credit/Debit Card" && (
@@ -508,7 +714,7 @@ export default function PaymentClient() {
                   <div className="space-y-6">
                     <div className="text-center">
                       <p className="text-gray-700 font-semibold mb-4">
-                        Scan QR Code to Pay ${planInfo?.price.toFixed(2)}
+                        Scan QR Code to Pay ${finalPrice.toFixed(2)}
                       </p>
                       <div className="inline-block p-4 bg-white border-2 border-gray-300 rounded-2xl shadow-lg">
                         <img
@@ -553,7 +759,7 @@ export default function PaymentClient() {
                         Processing Payment...
                       </span>
                     ) : (
-                      `Pay $${planInfo?.price.toFixed(2)}`
+                      `Pay ${finalPrice.toFixed(2)}`
                     )}
                   </button>
 

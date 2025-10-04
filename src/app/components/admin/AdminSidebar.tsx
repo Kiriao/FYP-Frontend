@@ -10,7 +10,8 @@ import {
   Flag, 
   HelpCircle, 
   MessageCircle, 
-  BarChart3 
+  BarChart3,
+  Ticket
 } from 'lucide-react';
 
 interface AdminSidebarProps {
@@ -24,6 +25,7 @@ const TABS = [
   { id: "reviews", label: "Reviews", icon: MessageSquare },
   { id: "plans", label: "Plans", icon: CreditCard },
   { id: "subscriptions", label: "Subscriptions", icon: UserCheck },
+  { id: "promoCodes", label: "Promo Codes", icon: Ticket },
   { id: "reports", label: "Reports", icon: AlertTriangle },
   { id: "reportedContent", label: "Reported Content", icon: Flag },
   { id: "FAQs", label: "FAQs", icon: HelpCircle },

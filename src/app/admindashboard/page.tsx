@@ -21,6 +21,7 @@ import AdminSidebar from "../components/admin/AdminSidebar";
 import UsersTab from "../components/admin/UsersTab";
 import PlansTab from "../components/admin/PlansTab";
 import SubscriptionsTab from "../components/admin/SubscriptionsTab";
+import PromoTab from "../components/admin/PromoTab";
 import ReviewsTab from "../components/admin/ReviewsTab";
 import ReportsTab from "../components/admin/ReportsTab";
 import ReportedContentTab from "../components/admin/ReportedContentTab";
@@ -35,6 +36,7 @@ interface ReviewData { uid: string; userName: string; message: string; showOnHom
 interface ContactData { uid: string; name: string; email: string; message: string; createdAt: any; status?: string; }
 interface PlanData { id: string; name: string; price: number; description: string; features: string[]; }
 interface PlanSummary { plan: string; count: number; }
+interface PromoCode { id: string; code: string; discountType: 'percentage' | 'fixed'; discountValue: number; isActive: boolean; expiresAt?: any; usageLimit?: number; usedCount?: number; minPurchase?: number; createdAt?: any; description?: string; }
 interface Review { id: string; userId: string; userName: string; content: string; itemId: string; type: string; title: string; }
 interface Report { id: string; reviewId?: string; reportedBy: string; reason?: string; createdAt: any; reviewData?: Review; title?: string; itemId?: string; type?: string; status?: string; }
 interface FAQItem { id: string; question: string; answer: string; category?: string; createdAt: any; updatedAt: any; }
@@ -56,6 +58,7 @@ export default function AdminDashboard() {
   const [plans, setPlans] = useState<PlanData[]>([]);
   const [planSummary, setPlanSummary] = useState<PlanSummary[]>([]);
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
+  const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
   const [reportedContent, setReportedContent] = useState<Report[]>([]);
   const [faqs, setFaqs] = useState<FAQItem[]>([]);
@@ -64,7 +67,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState<string>("overview");
+  const [activeTab,setActiveTab] = useState<string>("overview");
   const [stats, setStats] = useState<DashboardStats>({
     totalUsers: 0,
     newUsersThisWeek: 0,
@@ -82,7 +85,8 @@ export default function AdminDashboard() {
     reportsList: Report[],
     reportedContentList: Report[],
     questionsList: UserQuestion[],
-    contactsList: ContactData[]
+    contactsList: ContactData[],
+    promoCodesList: PromoCode[]
   ) => {
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
@@ -200,6 +204,22 @@ export default function AdminDashboard() {
     }
   };
 
+  const fetchPromoCodes = async () => {
+  try {
+    const q = query(collection(db, "promoCodes"), orderBy("createdAt", "desc"));
+    const snap = await getDocs(q);
+    const list = snap.docs.map(doc => ({ 
+      id: doc.id, 
+      ...doc.data() 
+    } as PromoCode));
+    setPromoCodes(list);
+    return list;
+  } catch (err) {
+    console.error("Error fetching promo codes:", err);
+    return [];
+  }
+};
+
   const fetchReports = async () => {
     try {
       const q = query(collection(db, "reports"), orderBy("createdAt", "desc"));
@@ -303,38 +323,40 @@ export default function AdminDashboard() {
   };
 
   // Refresh all data
-  const refreshAllData = async () => {
-    setRefreshing(true);
-    try {
-      const [
-        usersList,
-        reviewsList,
-        contactsList,
-        plansList,
-        subscriptionsList,
-        reportsList,
-        reportedContentList,
-        faqsList,
-        questionsList
-      ] = await Promise.all([
-        fetchUsers(),
-        fetchReviews(),
-        fetchContacts(),
-        fetchPlans(),
-        fetchSubscriptions(),
-        fetchReports(),
-        fetchReportedContent(),
-        fetchFAQs(),
-        fetchUserQuestions()
-      ]);
+const refreshAllData = async () => {
+  setRefreshing(true);
+  try {
+    const [
+      usersList,
+      reviewsList,
+      contactsList,
+      plansList,
+      subscriptionsList,
+      reportsList,
+      reportedContentList,
+      faqsList,
+      questionsList,
+      promoCodesList 
+    ] = await Promise.all([
+      fetchUsers(),
+      fetchReviews(),
+      fetchContacts(),
+      fetchPlans(),
+      fetchSubscriptions(),
+      fetchReports(),
+      fetchReportedContent(),
+      fetchFAQs(),
+      fetchUserQuestions(),
+      fetchPromoCodes()
+    ]);
 
-      calculateStats(usersList, reviewsList, reportsList, reportedContentList, questionsList, contactsList);
-    } catch (err) {
-      console.error("Error refreshing data:", err);
-    } finally {
-      setRefreshing(false);
-    }
-  };
+    calculateStats(usersList, reviewsList, reportsList, reportedContentList, questionsList, contactsList, promoCodesList);
+  } catch (err) {
+    console.error("Error refreshing data:", err);
+  } finally {
+    setRefreshing(false);
+  }
+};
 
   // Auth and initialization
   useEffect(() => {
@@ -344,53 +366,55 @@ export default function AdminDashboard() {
     return () => unsub();
   }, []);
 
-  useEffect(() => {
-    if (!currentUser) return;
+useEffect(() => {
+  if (!currentUser) return;
 
-    const fetchAdminData = async () => {
-      setLoading(true);
-      try {
-        const snap = await getDoc(doc(db, "users", currentUser.uid));
-        const role = snap.exists() ? snap.data()?.role : null;
+  const fetchAdminData = async () => {
+    setLoading(true);
+    try {
+      const snap = await getDoc(doc(db, "users", currentUser.uid));
+      const role = snap.exists() ? snap.data()?.role : null;
 
-        if (role !== "admin") {
-          setError("You do not have permission to view this page.");
-          return;
-        }
-
-        const [
-          usersList,
-          reviewsList,
-          contactsList,
-          plansList,
-          subscriptionsList,
-          reportsList,
-          reportedContentList,
-          faqsList,
-          questionsList
-        ] = await Promise.all([
-          fetchUsers(),
-          fetchReviews(),
-          fetchContacts(),
-          fetchPlans(),
-          fetchSubscriptions(),
-          fetchReports(),
-          fetchReportedContent(),
-          fetchFAQs(),
-          fetchUserQuestions()
-        ]);
-
-        calculateStats(usersList, reviewsList, reportsList, reportedContentList, questionsList, contactsList);
-      } catch (err) {
-        console.error(err);
-        setError("Failed to fetch admin data.");
-      } finally {
-        setLoading(false);
+      if (role !== "admin") {
+        setError("You do not have permission to view this page.");
+        return;
       }
-    };
 
-    fetchAdminData();
-  }, [currentUser]);
+      const [
+        usersList,
+        reviewsList,
+        contactsList,
+        plansList,
+        subscriptionsList,
+        reportsList,
+        reportedContentList,
+        faqsList,
+        questionsList,
+        promoCodesList  
+      ] = await Promise.all([
+        fetchUsers(),
+        fetchReviews(),
+        fetchContacts(),
+        fetchPlans(),
+        fetchSubscriptions(),
+        fetchReports(),
+        fetchReportedContent(),
+        fetchFAQs(),
+        fetchUserQuestions(),
+        fetchPromoCodes()  
+      ]);
+
+      calculateStats(usersList, reviewsList, reportsList, reportedContentList, questionsList, contactsList, promoCodesList);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to fetch admin data.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchAdminData();
+}, [currentUser]);
 
   if (loading) {
     return (
@@ -536,6 +560,8 @@ export default function AdminDashboard() {
         return <PlansTab plans={plans} fetchPlans={fetchPlans} />;
       case "subscriptions":
         return <SubscriptionsTab subscriptions={subscriptions} planSummary={planSummary} plans={plans} />;
+      case "promoCodes":
+        return <PromoTab promoCodes={promoCodes} onRefresh={fetchPromoCodes} />;
       case "reports":
         return <ReportsTab reports={reports} setReports={setReports} />;
       case "reportedContent":
