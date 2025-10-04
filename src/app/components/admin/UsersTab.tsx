@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { updateDoc, doc, deleteDoc, collection, getDocs } from 'firebase/firestore';
+import { updateDoc, doc, deleteDoc, collection, getDocs, query, where, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import jsPDF from 'jspdf';
 import { 
   Search, 
   Edit2, 
@@ -16,7 +17,10 @@ import {
   Mail,
   Calendar,
   Crown,
-  Shield
+  Shield,
+  FileText,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 
 interface UserData {
@@ -38,12 +42,23 @@ interface PlanOption {
   name: string;
 }
 
+interface Subscription {
+  plan: string;
+  amount: number;
+  status: string;
+  createdAt: any;
+  userId: string;
+}
+
 export default function UsersTab({ users, setUsers }: UsersTabProps) {
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterRole, setFilterRole] = useState("all");
   const [filterPlan, setFilterPlan] = useState("all");
   const [plans, setPlans] = useState<PlanOption[]>([]);
+  const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [editForm, setEditForm] = useState({
     fullName: "",
     email: "",
@@ -82,6 +97,181 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
       return new Date(timestamp);
     }
     return null;
+  };
+
+  // Generate invoice for a single user
+  const generateInvoiceForUser = async (user: UserData, subscriptions: Subscription[]) => {
+    const doc = new jsPDF();
+    let yPosition = 20;
+
+    // Header
+    doc.setFontSize(24);
+    doc.setTextColor(219, 39, 119);
+    doc.text("INVOICE SUMMARY", 14, yPosition);
+    
+    doc.setDrawColor(219, 39, 119);
+    doc.setLineWidth(0.5);
+    doc.line(14, yPosition + 5, 196, yPosition + 5);
+
+    yPosition += 15;
+
+    // User Info
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    doc.text("Customer Information:", 14, yPosition);
+    yPosition += 7;
+    
+    doc.setFontSize(10);
+    doc.setTextColor(60, 60, 60);
+    doc.text(`Name: ${user.fullName}`, 14, yPosition);
+    yPosition += 6;
+    doc.text(`Email: ${user.email}`, 14, yPosition);
+    yPosition += 6;
+    doc.text(`Customer ID: ${user.uid.substring(0, 12)}...`, 14, yPosition);
+    yPosition += 6;
+    doc.text(`Plan: ${user.plan || "Free Plan"}`, 14, yPosition);
+    yPosition += 6;
+    doc.text(`Role: ${user.role || "user"}`, 14, yPosition);
+    yPosition += 10;
+
+    // Subscriptions table
+    if (subscriptions.length > 0) {
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      doc.text("Payment History:", 14, yPosition);
+      yPosition += 7;
+
+      // Table header
+      doc.setFillColor(249, 250, 251);
+      doc.rect(14, yPosition, 182, 8, 'F');
+      doc.setFontSize(9);
+      doc.setTextColor(60, 60, 60);
+      doc.text("Date", 18, yPosition + 5);
+      doc.text("Plan", 60, yPosition + 5);
+      doc.text("Status", 110, yPosition + 5);
+      doc.text("Amount", 150, yPosition + 5);
+      yPosition += 10;
+
+      // Table rows
+      let totalAmount = 0;
+      subscriptions.forEach((sub) => {
+        if (yPosition > 270) {
+          doc.addPage();
+          yPosition = 20;
+        }
+
+        const subDate = sub.createdAt?.toDate ? sub.createdAt.toDate() : new Date(sub.createdAt);
+        doc.setFontSize(9);
+        doc.setTextColor(60, 60, 60);
+        doc.text(subDate.toLocaleDateString(), 18, yPosition);
+        doc.text(sub.plan, 60, yPosition);
+        
+        // Status with color
+        if (sub.status === "paid") {
+          doc.setTextColor(34, 197, 94);
+        } else if (sub.status === "pending") {
+          doc.setTextColor(234, 179, 8);
+        } else {
+          doc.setTextColor(220, 38, 38);
+        }
+        doc.text(sub.status.toUpperCase(), 110, yPosition);
+        
+        doc.setTextColor(60, 60, 60);
+        doc.text(`$${sub.amount.toFixed(2)}`, 150, yPosition);
+        
+        totalAmount += sub.amount;
+        yPosition += 7;
+      });
+
+      // Total
+      yPosition += 5;
+      doc.setDrawColor(200, 200, 200);
+      doc.line(14, yPosition, 196, yPosition);
+      yPosition += 7;
+      
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      doc.text("Total Amount:", 110, yPosition);
+      doc.setFontSize(14);
+      doc.setTextColor(219, 39, 119);
+      doc.text(`$${totalAmount.toFixed(2)}`, 150, yPosition);
+    } else {
+      doc.setFontSize(10);
+      doc.setTextColor(120, 120, 120);
+      doc.text("No payment history found for this user.", 14, yPosition);
+    }
+
+    // Footer
+    yPosition = 280;
+    doc.setFontSize(9);
+    doc.setTextColor(120, 120, 120);
+    doc.text("Generated on: " + new Date().toLocaleDateString(), 14, yPosition);
+    doc.text("For questions, contact: support@yourcompany.com", 14, yPosition + 5);
+
+    return doc;
+  };
+
+  // Export invoices for selected users
+  const exportSelectedInvoices = async () => {
+    if (selectedUsers.size === 0) {
+      alert("Please select at least one user to export invoices.");
+      return;
+    }
+
+    setLoadingInvoices(true);
+    try {
+      const selectedUsersList = Array.from(selectedUsers);
+      
+      for (const userId of selectedUsersList) {
+        const user = users.find(u => u.uid === userId);
+        if (!user) continue;
+
+        // Fetch subscriptions for this user
+        const q = query(
+          collection(db, "subscriptions"),
+          where("userId", "==", userId),
+          orderBy("createdAt", "desc")
+        );
+        const snapshot = await getDocs(q);
+        const subscriptions = snapshot.docs.map((doc) => doc.data() as Subscription);
+
+        // Generate PDF
+        const pdf = await generateInvoiceForUser(user, subscriptions);
+        pdf.save(`invoice_${user.fullName.replace(/\s+/g, '_')}_${Date.now()}.pdf`);
+
+        // Add small delay between downloads
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      alert(`Successfully exported ${selectedUsers.size} invoice(s)!`);
+      setSelectedUsers(new Set());
+      setShowInvoiceModal(false);
+    } catch (error) {
+      console.error("Error generating invoices:", error);
+      alert("Failed to generate invoices. Please try again.");
+    } finally {
+      setLoadingInvoices(false);
+    }
+  };
+
+  // Toggle user selection
+  const toggleUserSelection = (uid: string) => {
+    const newSelected = new Set(selectedUsers);
+    if (newSelected.has(uid)) {
+      newSelected.delete(uid);
+    } else {
+      newSelected.add(uid);
+    }
+    setSelectedUsers(newSelected);
+  };
+
+  // Select all filtered users
+  const selectAllUsers = () => {
+    if (selectedUsers.size === filteredUsers.length) {
+      setSelectedUsers(new Set());
+    } else {
+      setSelectedUsers(new Set(filteredUsers.map(u => u.uid)));
+    }
   };
 
   const handleDeleteUser = async (uid: string, userName: string) => {
@@ -234,13 +424,22 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
           <h2 className="text-3xl font-bold text-gray-800">Users Management</h2>
           <p className="text-gray-600 mt-1">Manage and monitor all platform users</p>
         </div>
-        <button
-          onClick={exportToCSV}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-        >
-          <Download className="w-4 h-4" />
-          Export CSV
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={() => setShowInvoiceModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+          >
+            <FileText className="w-4 h-4" />
+            Export Invoices
+          </button>
+          <button
+            onClick={exportToCSV}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </button>
+        </div>
       </div>
 
       {/* Statistics Cards */}
@@ -413,6 +612,118 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
           </table>
         </div>
       </div>
+
+      {/* Invoice Export Modal */}
+      {showInvoiceModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden transform transition-all">
+            <div className="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="text-2xl font-bold">Export User Invoices</h3>
+                  <p className="text-purple-100 mt-1">Select users to generate invoice PDFs</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowInvoiceModal(false);
+                    setSelectedUsers(new Set());
+                  }}
+                  className="p-1 hover:bg-white hover:bg-opacity-20 rounded-lg transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 max-h-[60vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <button
+                  onClick={selectAllUsers}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
+                >
+                  {selectedUsers.size === filteredUsers.length ? (
+                    <CheckSquare className="w-4 h-4" />
+                  ) : (
+                    <Square className="w-4 h-4" />
+                  )}
+                  {selectedUsers.size === filteredUsers.length ? "Deselect All" : "Select All"}
+                </button>
+                <span className="text-sm text-gray-600">
+                  {selectedUsers.size} user{selectedUsers.size !== 1 ? 's' : ''} selected
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {filteredUsers.map(user => (
+                  <div
+                    key={user.uid}
+                    onClick={() => toggleUserSelection(user.uid)}
+                    className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                      selectedUsers.has(user.uid)
+                        ? 'border-purple-500 bg-purple-50'
+                        : 'border-gray-200 hover:border-gray-300 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors ${
+                        selectedUsers.has(user.uid)
+                          ? 'bg-purple-600 border-purple-600'
+                          : 'border-gray-300'
+                      }`}>
+                        {selectedUsers.has(user.uid) && (
+                          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                      <div className="w-10 h-10 bg-gradient-to-br from-pink-400 to-purple-400 rounded-full flex items-center justify-center text-white font-semibold">
+                        {user.fullName.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-800">{user.fullName}</p>
+                        <p className="text-sm text-gray-500">{user.email}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        {getRoleBadge(user.role)}
+                        {getPlanBadge(user.plan)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 px-6 pb-6 pt-4 border-t">
+              <button
+                onClick={() => {
+                  setShowInvoiceModal(false);
+                  setSelectedUsers(new Set());
+                }}
+                className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={exportSelectedInvoices}
+                disabled={selectedUsers.size === 0 || loadingInvoices}
+                className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loadingInvoices ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    Export {selectedUsers.size} Invoice{selectedUsers.size !== 1 ? 's' : ''}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit User Modal */}
       {editingUser && (

@@ -99,6 +99,7 @@ function PublishForm() {
   const [link, setLink] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
   const generateId = () => title.trim().replace(/\s+/g, "-").toLowerCase();
 
@@ -259,6 +260,19 @@ function PublishForm() {
 
         <div className="flex gap-3 pt-4">
           <button
+            type="button"
+            onClick={() => {
+              if (!title.trim() || !authors.trim()) {
+                setMessage("❌ Title and Authors are required");
+                return;
+              }
+              setShowPreview(true);
+            }}
+            className="flex-1 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-semibold hover:shadow-lg hover:transform hover:scale-105 transition-all"
+          >
+            👁️ Preview
+          </button>
+          <button
             type="submit"
             disabled={loading}
             className={`flex-1 py-3 rounded-lg font-semibold transition-all duration-200 ${
@@ -280,6 +294,24 @@ function PublishForm() {
 
         {message && <ResponseMessage message={message} />}
       </form>
+
+      {/* Preview Modal */}
+      {showPreview && (
+        <PreviewModal
+          content={{
+            id: generateId(),
+            title: title.trim(),
+            authors: authors.split(",").map((a) => a.trim()).filter(Boolean),
+            categories: selectedCategories,
+            synopsis: synopsis.trim(),
+            thumbnail: thumbnail.trim(),
+            link: link.trim(),
+          }}
+          category={category}
+          onClose={() => setShowPreview(false)}
+          onPublish={handlePublish}
+        />
+      )}
     </div>
   );
 }
@@ -912,7 +944,7 @@ function UpdateForm() {
                   type="text"
                   value={formData.title || ""}
                   onChange={(e) => handleFieldChange("title", e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
                 />
               </div>
               <div>
@@ -928,7 +960,7 @@ function UpdateForm() {
                       e.target.value.split(",").map((a) => a.trim())
                     )
                   }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+                  className="w-full px-4 py-3 border text-gray-900 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
                 />
               </div>
             </div>
@@ -961,7 +993,7 @@ function UpdateForm() {
                 value={formData.synopsis || ""}
                 onChange={(e) => handleFieldChange("synopsis", e.target.value)}
                 rows={4}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition resize-none"
+                className="w-full px-4 py-3 border border-gray-300 text-gray-900 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition resize-none"
               />
             </div>
 
@@ -974,7 +1006,7 @@ function UpdateForm() {
                   type="text"
                   value={formData.thumbnail || ""}
                   onChange={(e) => handleFieldChange("thumbnail", e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+                  className="w-full px-4 py-3 border text-gray-900 border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
                 />
               </div>
               <div>
@@ -985,7 +1017,7 @@ function UpdateForm() {
                   type="text"
                   value={formData.link || ""}
                   onChange={(e) => handleFieldChange("link", e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
                 />
               </div>
             </div>
@@ -1276,6 +1308,149 @@ function ConfirmModal({
             className="flex-1 py-3 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition"
           >
             Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PreviewModal({
+  content,
+  category,
+  onClose,
+  onPublish,
+}: {
+  content: {
+    id: string;
+    title: string;
+    authors: string[];
+    categories: string[];
+    synopsis: string;
+    thumbnail: string;
+    link: string;
+  };
+  category: CategoryType;
+  onClose: () => void;
+  onPublish: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl max-w-3xl w-full my-8 shadow-2xl transform transition-all">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 rounded-t-2xl">
+          <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+            👁️ Content Preview
+          </h3>
+          <p className="text-blue-100 mt-1">Review before publishing</p>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+          {/* Category Badge */}
+          <div className="flex items-center gap-2">
+            <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-semibold">
+              {category === "books" ? "📚" : "🎥"} {category.charAt(0).toUpperCase() + category.slice(1)}
+            </span>
+            <span className="text-xs text-gray-500">ID: {content.id}</span>
+          </div>
+
+          {/* Main Content with Thumbnail */}
+          <div className="flex gap-6">
+            {/* Thumbnail */}
+            {content.thumbnail ? (
+              <div className="flex-shrink-0">
+                <img
+                  src={content.thumbnail}
+                  alt={content.title}
+                  className="w-32 h-48 object-cover rounded-lg shadow-md border-2 border-gray-200"
+                  onError={(e) => {
+                    e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='192'%3E%3Crect fill='%23e5e7eb' width='128' height='192'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.3em' fill='%239ca3af' font-family='sans-serif' font-size='14'%3ENo Image%3C/text%3E%3C/svg%3E";
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="flex-shrink-0 w-32 h-48 bg-gray-200 rounded-lg flex items-center justify-center border-2 border-gray-300">
+                <span className="text-gray-400 text-sm">No Image</span>
+              </div>
+            )}
+
+            {/* Details */}
+            <div className="flex-1 space-y-4">
+              <div>
+                <h4 className="text-2xl font-bold text-gray-900">{content.title}</h4>
+                <p className="text-gray-600 mt-1">
+                  by {content.authors.length > 0 ? content.authors.join(", ") : "Unknown Author"}
+                </p>
+              </div>
+
+              {/* Categories */}
+              {content.categories.length > 0 && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-700 mb-2">Categories:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {content.categories.map((cat) => (
+                      <span
+                        key={cat}
+                        className="px-3 py-1 bg-pink-100 text-pink-700 rounded-full text-sm font-medium"
+                      >
+                        {cat}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Synopsis */}
+              {content.synopsis && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-700 mb-2">Synopsis:</p>
+                  <p className="text-gray-700 leading-relaxed">{content.synopsis}</p>
+                </div>
+              )}
+
+              {/* Link */}
+              {content.link && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-700 mb-1">Content Link:</p>
+                  <a
+                    href={content.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 underline break-all text-sm"
+                  >
+                    {content.link}
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* JSON Preview */}
+          <div>
+            <p className="text-sm font-semibold text-gray-700 mb-2">JSON Data:</p>
+            <pre className="bg-gray-100 p-4 rounded-lg text-xs overflow-x-auto border border-gray-300">
+              {JSON.stringify(content, null, 2)}
+            </pre>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="p-6 border-t border-gray-200 flex gap-3">
+          <button
+            onClick={() => {
+              onPublish();
+              onClose();
+            }}
+            className="flex-1 py-3 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-lg font-semibold hover:shadow-lg hover:transform hover:scale-105 transition-all"
+          >
+            ✅ Looks Good, Publish
+          </button>
+          <button
+            onClick={onClose}
+            className="flex-1 py-3 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition"
+          >
+            ← Back to Edit
           </button>
         </div>
       </div>
