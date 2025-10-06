@@ -11,7 +11,8 @@ import {
   HelpCircle, 
   MessageCircle, 
   BarChart3,
-  Ticket
+  Ticket,
+  Mail
 } from 'lucide-react';
 
 interface AdminSidebarProps {
@@ -23,6 +24,7 @@ const TABS = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "users", label: "Users", icon: Users },
   { id: "reviews", label: "Reviews", icon: MessageSquare },
+  { id: "contacts", label: "Contacts", icon: Mail }, // ADD THIS LINE
   { id: "plans", label: "Plans", icon: CreditCard },
   { id: "subscriptions", label: "Subscriptions", icon: UserCheck },
   { id: "promoCodes", label: "Promo Codes", icon: Ticket },
