@@ -1,4 +1,5 @@
-import type * as React from "react";
+// global.d.ts
+import React from "react";
 
 declare global {
   namespace JSX {
@@ -7,12 +8,20 @@ declare global {
         React.HTMLAttributes<HTMLElement>,
         HTMLElement
       > & {
-        "agent-id": string;       // required
-        "chat-title"?: string;
-        "intent"?: string;
+        "project-id"?: string;
+        "agent-id"?: string;
+        "location"?: string;
         "language-code"?: string;
+        "max-query-length"?: string;
+      };
+      "df-messenger-chat-bubble": React.DetailedHTMLProps<
+        React.HTMLAttributes<HTMLElement>,
+        HTMLElement
+      > & {
+        "chat-title"?: string;
       };
     }
   }
 }
+
 export {};
