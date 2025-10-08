@@ -16,10 +16,11 @@ export async function GET(request: NextRequest) {
   const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
   
   const apiKey = process.env.NLB_API_KEY;
+  const appCode = process.env.NLB_APP_CODE;
 
-  if (!apiKey) {
+  if (!apiKey || !appCode) {
     return NextResponse.json(
-      { error: 'NLB API key not configured. Please add NLB_API_KEY to your .env.local file' },
+      { error: 'NLB API credentials not configured. Please add NLB_API_KEY and NLB_APP_CODE to your .env.local file' },
       { status: 500 }
     );
   }
@@ -42,12 +43,18 @@ export async function GET(request: NextRequest) {
 
   try {
     // Build query parameters according to NLB API specification
+    // Try multiple variations of AppCode parameter
     const params = new URLSearchParams({
       APIKey: apiKey,
       Keywords: query,
       Limit: String(pageSize),
       SetNo: String(page),
     });
+    
+    // Try AppCode in different formats
+    params.append('X-App-Code', appCode);
+    params.append('AppCode', appCode);
+    params.append('appCode', appCode);
 
     // Add media code filter if specified
     if (mediaCode && mediaCode !== 'ALL') {
@@ -62,6 +69,7 @@ export async function GET(request: NextRequest) {
       headers: {
         'Accept': 'application/json',
         'User-Agent': 'NLB-Catalogue-Integration/1.0',
+        'X-App-Code': appCode, // Try as header
       },
       // Add timeout
       signal: AbortSignal.timeout(10000), // 10 second timeout
