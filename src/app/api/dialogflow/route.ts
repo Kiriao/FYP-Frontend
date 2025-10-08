@@ -1,30 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// ✅ Handle Dialogflow’s initial verification GET
+// ✅ Responds to verification GET requests
 export async function GET() {
   return NextResponse.json({ status: "Webhook is live" }, { status: 200 });
 }
 
-// ✅ Handle POST requests from Dialogflow
+// ✅ Responds safely to Dialogflow POST (even empty test body)
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    console.log("Dialogflow request:", body);
+    const text = "Hello from Next.js webhook!";
+    let body = {};
+    try {
+      body = await req.json();
+      console.log("Dialogflow request:", body);
+    } catch {
+      console.log("No JSON body (verification POST)");
+    }
 
-    // Your fulfillment logic here
-    const fulfillmentText = "Hello from Next.js webhook!";
-
-    return NextResponse.json({
-      fulfillment_response: {
-        messages: [
-          {
-            text: { text: [fulfillmentText] },
-          },
-        ],
+    return NextResponse.json(
+      {
+        fulfillment_response: {
+          messages: [{ text: { text: [text] } }],
+        },
       },
-    });
+      { status: 200 }
+    );
   } catch (error) {
     console.error("Webhook error:", error);
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
