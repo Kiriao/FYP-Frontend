@@ -2,10 +2,12 @@
 
 import React, { useEffect, useState } from "react";
 
+// Define wrapper components for custom elements
 const DFMessenger = (props: any) => React.createElement("df-messenger", props);
 const DFBubble = (props: any) =>
   React.createElement("df-messenger-chat-bubble", props);
 
+// --- Utility helpers ---
 function newSessionId() {
   return `kidflix-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -28,11 +30,11 @@ export default function DialogflowMessenger() {
   const projectId = process.env.NEXT_PUBLIC_DF_PROJECT_ID!;
   const agentId = process.env.NEXT_PUBLIC_DF_AGENT_ID!;
   const location = process.env.NEXT_PUBLIC_DF_LOCATION || "asia-southeast1";
-  const chatTitle = process.env.NEXT_PUBLIC_CHAT_TITLE || "Kidflix Assistant";
+  const chatTitle = process.env.NEXT_PUBLIC_CHAT_TITLE || "FlixBot";
 
   const SESSION_KEY = "kidflix_df_session_id";
 
-  // Step 1: Inject Trusted Types shim immediately in <head>
+  // --- 1️⃣ Inject Trusted Types shim *immediately* ---
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -58,10 +60,10 @@ export default function DialogflowMessenger() {
         }
       })();
     `;
-    document.head.prepend(shim);
+    document.head.prepend(shim); // run before any async script
   }, []);
 
-  // Step 2: Load Dialogflow script AFTER the shim is in place
+  // --- 2️⃣ Load Dialogflow script only *after* shim is ready ---
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -83,7 +85,7 @@ export default function DialogflowMessenger() {
     document.head.appendChild(script);
   }, []);
 
-  // Step 3: Stable session id
+  // --- 3️⃣ Maintain stable session id ---
   useEffect(() => {
     if (typeof window === "undefined") return;
     let sid = sessionStorage.getItem(SESSION_KEY);
@@ -103,13 +105,13 @@ export default function DialogflowMessenger() {
 
   return (
     <>
-      {/* DF Messenger default theme */}
+      {/* Dialogflow Default Theme */}
       <link
         rel="stylesheet"
         href="https://www.gstatic.com/dialogflow-console/fast/df-messenger/prod/v1/themes/df-messenger-default.css"
       />
 
-      {/* Render messenger once ready */}
+      {/* Render only when ready */}
       {ready && sessionId && (
         <DFMessenger
           key={sessionId}
