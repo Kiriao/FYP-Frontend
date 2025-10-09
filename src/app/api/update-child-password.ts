@@ -1,4 +1,4 @@
-/* // pages/api/update-child-password.ts
+// pages/api/update-child-password.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import admin from "@/lib/firebaseAdmin"; // make sure Admin SDK is initialized
 
@@ -25,4 +25,3 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(400).json({ success: false, error: err.message });
   }
 }
- */
