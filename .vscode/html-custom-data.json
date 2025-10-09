@@ -1,0 +1,23 @@
+{
+  "version": 1.1,
+  "tags": [
+    {
+      "name": "df-messenger",
+      "description": "Dialogflow Messenger Component",
+      "attributes": [
+        { "name": "location" },
+        { "name": "project-id" },
+        { "name": "agent-id" },
+        { "name": "language-code" },
+        { "name": "max-query-length" }
+      ]
+    },
+    {
+      "name": "df-messenger-chat-bubble",
+      "description": "Dialogflow Chat Bubble",
+      "attributes": [
+        { "name": "chat-title" }
+      ]
+    }
+  ]
+}

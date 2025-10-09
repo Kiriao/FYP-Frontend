@@ -1,9 +1,6 @@
-"use client";
-import Script from "next/script";
-import { useEffect } from "react";
+import 'react';
 
-// Declare custom elements for TypeScript
-declare global {
+declare module 'react' {
   namespace JSX {
     interface IntrinsicElements {
       'df-messenger': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {

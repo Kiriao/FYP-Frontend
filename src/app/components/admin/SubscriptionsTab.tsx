@@ -39,6 +39,7 @@ const COLORS = ["#ec4899", "#8b5cf6", "#3b82f6", "#10b981", "#f59e0b", "#ef4444"
 interface PlanSummary {
   plan: string;
   count: number;
+  [key: string]: string | number;
 }
 
 interface PlanData {

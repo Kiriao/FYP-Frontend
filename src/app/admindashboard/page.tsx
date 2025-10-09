@@ -35,7 +35,7 @@ interface UserData { uid: string; fullName: string; email: string; role?: string
 interface ReviewData { uid: string; userName: string; message: string; showOnHome?: boolean; createdAt?: any; }
 interface ContactData { uid: string; name: string; email: string; subject: string; message: string; createdAt: any; status?: string; }
 interface PlanData { id: string; name: string; price: number; description: string; features: string[]; }
-interface PlanSummary { plan: string; count: number; }
+interface PlanSummary { plan: string; count: number; [key: string]: string | number; }
 interface PromoCode { id: string; code: string; discountType: 'percentage' | 'fixed'; discountValue: number; isActive: boolean; expiresAt?: any; usageLimit?: number; usedCount?: number; minPurchase?: number; createdAt?: any; description?: string; }
 interface Review { id: string; userId: string; userName: string; content: string; itemId: string; type: string; title: string; }
 interface Report { id: string; reviewId?: string; reportedBy: string; reason?: string; createdAt: any; reviewData?: Review; title?: string; itemId?: string; type?: string; status?: string; }
