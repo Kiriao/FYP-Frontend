@@ -1,35 +1,32 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Script from "next/script";
 
-// Safely create custom elements for TS
+// Define wrapper components
 const DFMessenger = (props: any) => React.createElement("df-messenger", props);
 const DFBubble = (props: any) =>
   React.createElement("df-messenger-chat-bubble", props);
 
-// Generate a unique, stable session ID per tab
+// Generate unique session IDs
 function newSessionId() {
   return `kidflix-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-// Optional: clear Dialogflow storage
 function clearDfStorage() {
   try {
     for (const store of [localStorage, sessionStorage]) {
-      Object.keys(store).forEach((key) => {
-        const lower = key.toLowerCase();
-        if (lower.includes("df") || lower.includes("dialogflow")) {
-          store.removeItem(key);
-        }
+      Object.keys(store).forEach((k) => {
+        const kk = k.toLowerCase();
+        if (kk.includes("df") || kk.includes("dialogflow")) store.removeItem(k);
       });
     }
   } catch {}
 }
 
 export default function DialogflowMessenger() {
-  const [ready, setReady] = React.useState(false);
-  const [sessionId, setSessionId] = React.useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   const projectId = process.env.NEXT_PUBLIC_DF_PROJECT_ID!;
   const agentId = process.env.NEXT_PUBLIC_DF_AGENT_ID!;
@@ -38,8 +35,41 @@ export default function DialogflowMessenger() {
 
   const SESSION_KEY = "kidflix_df_session_id";
 
-  // Setup session ID once per tab
-  React.useEffect(() => {
+  // Ensure the Trusted Types shim runs before anything else
+  useEffect(() => {
+    const shim = document.createElement("script");
+    shim.innerHTML = `
+      (function() {
+        try {
+          if (!window.trustedTypes) {
+            window.trustedTypes = {
+              createPolicy: function(name, rules) {
+                return {
+                  createHTML: rules.createHTML || ((x) => x),
+                  createScript: rules.createScript || ((x) => x),
+                  createScriptURL: rules.createScriptURL || ((x) => x)
+                };
+              }
+            };
+          } else if (!window.trustedTypes.createPolicy) {
+            window.trustedTypes.createPolicy = function(name, rules) {
+              return {
+                createHTML: rules.createHTML || ((x) => x),
+                createScript: rules.createScript || ((x) => x),
+                createScriptURL: rules.createScriptURL || ((x) => x)
+              };
+            };
+          }
+        } catch(e) {
+          console.error("Trusted Types shim error", e);
+        }
+      })();
+    `;
+    document.head.prepend(shim); // ensure it executes first
+  }, []);
+
+  // Session setup
+  useEffect(() => {
     if (typeof window === "undefined") return;
 
     let sid = sessionStorage.getItem(SESSION_KEY);
@@ -49,7 +79,6 @@ export default function DialogflowMessenger() {
     }
     setSessionId(sid);
 
-    // Expose a dev helper
     (window as any).resetKidflixChat = () => {
       clearDfStorage();
       const fresh = newSessionId();
@@ -65,48 +94,13 @@ export default function DialogflowMessenger() {
 
   return (
     <>
-      {/* --- Trusted Types shim (fixes createScriptURL issue) --- */}
-      <Script
-        id="df-tt-shim"
-        strategy="beforeInteractive"
-        dangerouslySetInnerHTML={{
-          __html: `
-            (function() {
-              try {
-                if (!window.trustedTypes) {
-                  window.trustedTypes = {
-                    createPolicy: function(name, rules) {
-                      return {
-                        createHTML: rules.createHTML || ((x) => x),
-                        createScript: rules.createScript || ((x) => x),
-                        createScriptURL: rules.createScriptURL || ((x) => x)
-                      };
-                    }
-                  };
-                } else if (!window.trustedTypes.createPolicy) {
-                  window.trustedTypes.createPolicy = function(name, rules) {
-                    return {
-                      createHTML: rules.createHTML || ((x) => x),
-                      createScript: rules.createScript || ((x) => x),
-                      createScriptURL: rules.createScriptURL || ((x) => x)
-                    };
-                  };
-                }
-              } catch(e) {
-                console.error("Trusted Types shim error", e);
-              }
-            })();
-          `,
-        }}
-      />
-
-      {/* --- Dialogflow Messenger stylesheet --- */}
+      {/* Dialogflow styles */}
       <link
         rel="stylesheet"
         href="https://www.gstatic.com/dialogflow-console/fast/df-messenger/prod/v1/themes/df-messenger-default.css"
       />
 
-      {/* --- Dialogflow Messenger script --- */}
+      {/* Dialogflow script */}
       <Script
         id="df-messenger-js"
         src="https://www.gstatic.com/dialogflow-console/fast/df-messenger/prod/v1/df-messenger.js"
@@ -114,7 +108,7 @@ export default function DialogflowMessenger() {
         onLoad={handleScriptLoad}
       />
 
-      {/* --- Render the widget once script is ready --- */}
+      {/* Render chat once ready */}
       {ready && sessionId && (
         <DFMessenger
           key={sessionId}
@@ -128,7 +122,7 @@ export default function DialogflowMessenger() {
             position: "fixed",
             bottom: "16px",
             right: "16px",
-            zIndex: 9999999999,
+            zIndex: 2147483647,
             ["--df-messenger-font-color" as any]: "#000",
             ["--df-messenger-font-family" as any]: "Google Sans",
             ["--df-messenger-chat-background" as any]: "#f3f6fc",
