@@ -1,14 +1,11 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import Script from "next/script";
 
-// Define wrapper components
 const DFMessenger = (props: any) => React.createElement("df-messenger", props);
 const DFBubble = (props: any) =>
   React.createElement("df-messenger-chat-bubble", props);
 
-// Generate unique session IDs
 function newSessionId() {
   return `kidflix-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -35,13 +32,16 @@ export default function DialogflowMessenger() {
 
   const SESSION_KEY = "kidflix_df_session_id";
 
-  // Ensure the Trusted Types shim runs before anything else
+  // Step 1: Inject Trusted Types shim immediately in <head>
   useEffect(() => {
+    if (typeof window === "undefined") return;
+
     const shim = document.createElement("script");
-    shim.innerHTML = `
+    shim.type = "text/javascript";
+    shim.textContent = `
       (function() {
         try {
-          if (!window.trustedTypes) {
+          if (!window.trustedTypes || !window.trustedTypes.createPolicy) {
             window.trustedTypes = {
               createPolicy: function(name, rules) {
                 return {
@@ -51,27 +51,41 @@ export default function DialogflowMessenger() {
                 };
               }
             };
-          } else if (!window.trustedTypes.createPolicy) {
-            window.trustedTypes.createPolicy = function(name, rules) {
-              return {
-                createHTML: rules.createHTML || ((x) => x),
-                createScript: rules.createScript || ((x) => x),
-                createScriptURL: rules.createScriptURL || ((x) => x)
-              };
-            };
+            console.log("✅ TrustedTypes shim injected before Dialogflow");
           }
         } catch(e) {
           console.error("Trusted Types shim error", e);
         }
       })();
     `;
-    document.head.prepend(shim); // ensure it executes first
+    document.head.prepend(shim);
   }, []);
 
-  // Session setup
+  // Step 2: Load Dialogflow script AFTER the shim is in place
   useEffect(() => {
     if (typeof window === "undefined") return;
 
+    const existing = document.querySelector("script#df-messenger-js");
+    if (existing) {
+      setReady(true);
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = "df-messenger-js";
+    script.src =
+      "https://www.gstatic.com/dialogflow-console/fast/df-messenger/prod/v1/df-messenger.js";
+    script.async = true;
+    script.onload = () => {
+      console.log("✅ Dialogflow script loaded safely");
+      setReady(true);
+    };
+    document.head.appendChild(script);
+  }, []);
+
+  // Step 3: Stable session id
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     let sid = sessionStorage.getItem(SESSION_KEY);
     if (!sid) {
       sid = newSessionId();
@@ -87,28 +101,15 @@ export default function DialogflowMessenger() {
     };
   }, []);
 
-  const handleScriptLoad = () => {
-    console.log("✅ Dialogflow script loaded");
-    setReady(true);
-  };
-
   return (
     <>
-      {/* Dialogflow styles */}
+      {/* DF Messenger default theme */}
       <link
         rel="stylesheet"
         href="https://www.gstatic.com/dialogflow-console/fast/df-messenger/prod/v1/themes/df-messenger-default.css"
       />
 
-      {/* Dialogflow script */}
-      <Script
-        id="df-messenger-js"
-        src="https://www.gstatic.com/dialogflow-console/fast/df-messenger/prod/v1/df-messenger.js"
-        strategy="afterInteractive"
-        onLoad={handleScriptLoad}
-      />
-
-      {/* Render chat once ready */}
+      {/* Render messenger once ready */}
       {ready && sessionId && (
         <DFMessenger
           key={sessionId}
@@ -117,7 +118,7 @@ export default function DialogflowMessenger() {
           agent-id={agentId}
           language-code="en"
           session-id={sessionId}
-          expand={false}
+          max-query-length="-1"
           style={{
             position: "fixed",
             bottom: "16px",
