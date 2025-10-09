@@ -1,4 +1,4 @@
-// src/app/api/create-child/route.ts
+/* // src/app/api/create-child/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { initializeApp, cert, getApps, getApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -102,3 +102,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+ */

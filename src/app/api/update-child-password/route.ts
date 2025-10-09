@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+/* import { NextRequest, NextResponse } from "next/server";
 import admin from "firebase-admin";
 
 // Initialize Firebase Admin only once
@@ -32,3 +32,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: err.message || "Internal server error" }, { status: 500 });
   }
 }
+ */
