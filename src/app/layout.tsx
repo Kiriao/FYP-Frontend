@@ -26,17 +26,8 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <head>
-        {/* 👇 Optional: ensure correct charset + viewport */}
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-      </head>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <ClientLayout>{children}</ClientLayout>
-
-        {/* 👇 Add the Dialogflow chatbot globally */}
         <DialogflowMessenger />
       </body>
     </html>
