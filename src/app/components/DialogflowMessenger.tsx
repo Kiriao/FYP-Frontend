@@ -2,12 +2,11 @@
 
 import React, { useEffect, useState } from "react";
 
-// Define wrapper components for custom elements
+// --- Helpers to safely create custom elements ---
 const DFMessenger = (props: any) => React.createElement("df-messenger", props);
 const DFBubble = (props: any) =>
   React.createElement("df-messenger-chat-bubble", props);
 
-// --- Utility helpers ---
 function newSessionId() {
   return `kidflix-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -34,41 +33,44 @@ export default function DialogflowMessenger() {
 
   const SESSION_KEY = "kidflix_df_session_id";
 
-  // --- 1️⃣ Inject Trusted Types shim *immediately* ---
+  // 1️⃣ Inject Trusted Types shim immediately
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const shim = document.createElement("script");
-    shim.type = "text/javascript";
-    shim.textContent = `
-      (function() {
-        try {
-          if (!window.trustedTypes || !window.trustedTypes.createPolicy) {
-            window.trustedTypes = {
-              createPolicy: function(name, rules) {
-                return {
-                  createHTML: rules.createHTML || ((x) => x),
-                  createScript: rules.createScript || ((x) => x),
-                  createScriptURL: rules.createScriptURL || ((x) => x)
-                };
-              }
-            };
-            console.log("✅ TrustedTypes shim injected before Dialogflow");
+    if (!(window as any).__df_shim_injected) {
+      const shim = document.createElement("script");
+      shim.type = "text/javascript";
+      shim.textContent = `
+        (function() {
+          try {
+            if (!window.trustedTypes || !window.trustedTypes.createPolicy) {
+              window.trustedTypes = {
+                createPolicy: function(name, rules) {
+                  return {
+                    createHTML: rules.createHTML || ((x) => x),
+                    createScript: rules.createScript || ((x) => x),
+                    createScriptURL: rules.createScriptURL || ((x) => x)
+                  };
+                }
+              };
+              console.log("✅ TrustedTypes shim injected");
+            }
+          } catch(e) {
+            console.error("Trusted Types shim error", e);
           }
-        } catch(e) {
-          console.error("Trusted Types shim error", e);
-        }
-      })();
-    `;
-    document.head.prepend(shim); // run before any async script
+        })();
+      `;
+      document.head.prepend(shim);
+      (window as any).__df_shim_injected = true;
+    }
   }, []);
 
-  // --- 2️⃣ Load Dialogflow script only *after* shim is ready ---
+  // 2️⃣ Load Dialogflow script exactly once
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const existing = document.querySelector("script#df-messenger-js");
-    if (existing) {
+    if ((window as any).__df_messenger_loaded) {
+      console.log("💡 Dialogflow script already loaded");
       setReady(true);
       return;
     }
@@ -79,15 +81,19 @@ export default function DialogflowMessenger() {
       "https://www.gstatic.com/dialogflow-console/fast/df-messenger/prod/v1/df-messenger.js";
     script.async = true;
     script.onload = () => {
-      console.log("✅ Dialogflow script loaded safely");
+      console.log("✅ Dialogflow script loaded once");
+      (window as any).__df_messenger_loaded = true;
       setReady(true);
     };
+    script.onerror = (e) => console.error("❌ Failed to load Dialogflow script", e);
+
     document.head.appendChild(script);
   }, []);
 
-  // --- 3️⃣ Maintain stable session id ---
+  // 3️⃣ Maintain session ID
   useEffect(() => {
     if (typeof window === "undefined") return;
+
     let sid = sessionStorage.getItem(SESSION_KEY);
     if (!sid) {
       sid = newSessionId();
@@ -105,13 +111,11 @@ export default function DialogflowMessenger() {
 
   return (
     <>
-      {/* Dialogflow Default Theme */}
       <link
         rel="stylesheet"
         href="https://www.gstatic.com/dialogflow-console/fast/df-messenger/prod/v1/themes/df-messenger-default.css"
       />
 
-      {/* Render only when ready */}
       {ready && sessionId && (
         <DFMessenger
           key={sessionId}
