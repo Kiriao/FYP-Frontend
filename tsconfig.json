@@ -11,6 +11,7 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
+    "typeRoots": ["./node_modules/@types", "./src/types"],
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,

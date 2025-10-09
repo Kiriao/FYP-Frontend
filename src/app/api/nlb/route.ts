@@ -3,10 +3,15 @@ import { NextResponse } from "next/server";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get("q") || "harry potter";
+  const offset = searchParams.get("offset") || "0";
+  const limit = searchParams.get("limit") || "20";
 
+  // Add Offset and Limit to the NLB API URL
   const apiUrl = `https://openweb.nlb.gov.sg/api/v2/Catalogue/SearchTitles?Keywords=${encodeURIComponent(
     query
-  )}`;
+  )}&Offset=${offset}&Limit=${limit}`;
+
+  console.log('NLB API URL:', apiUrl); // Debug log
 
   const res = await fetch(apiUrl, {
     headers: {

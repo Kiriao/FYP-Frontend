@@ -4,7 +4,7 @@ import { getDoc } from "firebase/firestore";
 import DialogflowMessenger from "../components/DialogflowMessenger";
 import Link from "next/link";
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, MoreHorizontal, BookOpen, Play, Check, Clock, Shield, AlertCircle, X, TrendingUp, Heart, Library } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, MoreHorizontal, BookOpen, Play, Check, Clock, Shield, AlertCircle, X, TrendingUp, Heart } from 'lucide-react';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, doc, setDoc, deleteDoc, getDocs, addDoc, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
@@ -28,14 +28,6 @@ interface Book {
   synopsis?: string;
   snippet?: string;
   buckets?: string[];
-  nlb?: {
-    BID: string;
-    ISBN?: string;
-    MediaCode?: string;
-    CallNumber?: string;
-    PublishYear?: string;
-    Publisher?: string;
-  };
 }
 
 interface Video {
@@ -119,9 +111,8 @@ interface UserProfile {
 }
 
 type ScreenTimeStatus = 'within-limits' | 'approaching-limit' | 'limit-exceeded' | 'bedtime' | 'disabled';
+
 type ToastType = 'info' | 'warning' | 'error' | 'success';
-type PageMode = 'books' | 'videos' | 'collection-books' | 'collection-videos' | 'nlb-books';
-type NLBMediaType = 'BOOK' | 'EBOOK' | 'AUDIOBOOK' | 'ALL';
 
 interface Toast {
   id: number;
@@ -157,13 +148,6 @@ const videoBucketDisplayNames = {
   animals: 'Animals',
   artcraft: 'Art & Crafts',
 } as const;
-
-const nlbMediaTypeLabels: Record<NLBMediaType, string> = {
-  'BOOK': 'Physical Books',
-  'EBOOK': 'eBooks',
-  'AUDIOBOOK': 'Audiobooks',
-  'ALL': 'All Types'
-};
 
 // ============================================
 // CUSTOM HOOKS
@@ -239,6 +223,7 @@ const useScreenTimeTracking = (user: User | null, settings: ScreenTimeSettings |
 
   useEffect(() => {
     return () => {
+      // Cleanup on unmount - but we need updateUsage function
       if (sessionRef.current) {
         sessionRef.current = null;
       }
@@ -272,14 +257,11 @@ const getItemId = (item: Book | Video | ContentItem) => {
 };
 
 const bestBookUrl = (book: Book): string | null => {
-  if (book.nlb?.BID) {
-    return `https://catalogue.nlb.gov.sg/search/card?bid=${book.nlb.BID}`;
-  }
   return (
     book.previewLink ||
     book.canonicalVolumeLink ||
     book.infoLink ||
-    (book.id && !book.id.startsWith('nlb-') ? `https://books.google.com/books?id=${encodeURIComponent(book.id)}` : null)
+    (book.id ? `https://books.google.com/books?id=${encodeURIComponent(book.id)}` : null)
   );
 };
 
@@ -413,7 +395,7 @@ const ScreenTimeIndicator = ({
 
 export default function DiscoverPage() {
   // Core state
-  const [mode, setMode] = useState<PageMode>('books');
+  const [mode, setMode] = useState<'books' | 'videos' | 'collection-books' | 'collection-videos'>('books');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState<User | null>(null);
@@ -437,13 +419,6 @@ export default function DiscoverPage() {
   const [collectionItems, setCollectionItems] = useState<ContentItem[]>([]);
   const [filteredCollectionItems, setFilteredCollectionItems] = useState<ContentItem[]>([]);
   const [collectionMessage, setCollectionMessage] = useState<string | null>(null);
-
-  // NLB state
-  const [nlbBooks, setNlbBooks] = useState<Book[]>([]);
-  const [nlbPage, setNlbPage] = useState(1);
-  const [nlbHasMore, setNlbHasMore] = useState(false);
-  const [nlbTotal, setNlbTotal] = useState<number | null>(null);
-  const [nlbMediaType, setNlbMediaType] = useState<NLBMediaType>('BOOK');
 
   // User data
   const [favourites, setFavourites] = useState<any[]>([]);
@@ -717,37 +692,6 @@ export default function DiscoverPage() {
     }
   };
 
-  const searchNLBBooks = async () => {
-    if (!searchQuery.trim()) {
-      showToast('Please enter a search term for NLB catalog', 'info');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      params.set('q', searchQuery.trim());
-      params.set('mediaCode', nlbMediaType);
-      params.set('page', String(nlbPage));
-      params.set('pageSize', String(pageSize));
-
-      const response = await fetch(`/api/nlb/search?${params.toString()}`);
-      if (!response.ok) throw new Error('NLB search failed');
-      
-      const data = await response.json();
-
-      setNlbBooks(data.items || []);
-      setNlbHasMore(!!data.hasMore);
-      setNlbTotal(typeof data.totalApprox === 'number' ? data.totalApprox : null);
-    } catch (error) {
-      console.error('NLB search failed:', error);
-      showToast('Failed to search NLB catalog. Please try again.', 'error');
-      setNlbBooks([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const fetchCollectionItems = async (category: 'books' | 'videos') => {
     setLoading(true);
     setCollectionMessage(null);
@@ -944,7 +888,7 @@ export default function DiscoverPage() {
   const submitReview = async () => {
     if (!user || !selectedItem) return;
 
-    const itemType = (mode === 'books' || mode === 'collection-books' || mode === 'nlb-books') ? 'book' : 'video';
+    const itemType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
     if (!canAccessContent(itemType)) {
       showToast(getScreenTimeMessage() || 'Content access is restricted.', 'warning');
       return;
@@ -985,7 +929,7 @@ export default function DiscoverPage() {
       return;
     }
 
-    const itemType = (mode === 'books' || mode === 'collection-books' || mode === 'nlb-books') ? 'book' : 'video';
+    const itemType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
     if (!canAccessContent(itemType)) {
       showToast(getScreenTimeMessage() || 'Content access is restricted.', 'warning');
       return;
@@ -1083,19 +1027,16 @@ export default function DiscoverPage() {
   const handleSearch = () => {
     setBooksPage(1);
     setVideosPage(1);
-    setNlbPage(1);
     if (mode === 'books') {
       searchBooks();
     } else if (mode === 'videos') {
       searchVideos();
-    } else if (mode === 'nlb-books') {
-      searchNLBBooks();
     } else if (mode === 'collection-books' || mode === 'collection-videos') {
       filterCollectionItems();
     }
   };
 
-  const handleModeChange = (newMode: PageMode) => {
+  const handleModeChange = (newMode: 'books' | 'videos' | 'collection-books' | 'collection-videos') => {
     if ((newMode === 'videos' || newMode === 'collection-videos') && !canAccessContent('video')) {
       showToast(getScreenTimeMessage() || 'Video content is restricted.', 'warning');
       return;
@@ -1105,7 +1046,6 @@ export default function DiscoverPage() {
     setSearchQuery('');
     if (newMode === 'books') setBooksPage(1);
     else if (newMode === 'videos') setVideosPage(1);
-    else if (newMode === 'nlb-books') setNlbPage(1);
   };
 
   const handleBucketChange = (newBucket: string) => {
@@ -1127,7 +1067,7 @@ export default function DiscoverPage() {
   };
 
   const handleContentItemClick = (item: Book | Video | ContentItem) => {
-    const contentType = (mode === 'books' || mode === 'collection-books' || mode === 'nlb-books') ? 'book' : 'video';
+    const contentType = (mode === 'books' || mode === 'collection-books') ? 'book' : 'video';
 
     if (!canAccessContent(contentType)) {
       showToast(getScreenTimeMessage() || 'Content access is restricted.', 'warning');
@@ -1242,12 +1182,8 @@ export default function DiscoverPage() {
       fetchCollectionItems('books');
     } else if (mode === 'collection-videos') {
       fetchCollectionItems('videos');
-    } else if (mode === 'nlb-books') {
-      if (searchQuery.trim()) {
-        searchNLBBooks();
-      }
     }
-  }, [mode, booksPage, videosPage, nlbPage, bucket, videoBucket, nlbMediaType]);
+  }, [mode, booksPage, videosPage, bucket, videoBucket]);
 
   useEffect(() => {
     if (mode === 'collection-books' || mode === 'collection-videos') {
@@ -1275,7 +1211,6 @@ export default function DiscoverPage() {
       case 'videos': return videos;
       case 'collection-books':
       case 'collection-videos': return filteredCollectionItems;
-      case 'nlb-books': return nlbBooks;
       default: return [];
     }
   };
@@ -1286,7 +1221,6 @@ export default function DiscoverPage() {
       case 'videos': return "Search video titles/topics (optional) e.g. animals, math…";
       case 'collection-books': return "Search our book collection by title, author, or category…";
       case 'collection-videos': return "Search our video collection by title, author, or category…";
-      case 'nlb-books': return "Search NLB catalog by title, author, or subject…";
       default: return "Search…";
     }
   };
@@ -1385,62 +1319,6 @@ export default function DiscoverPage() {
         <button onClick={() => setVideosPage(videosPage + 1)} disabled={!videosHasMore} className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50">
           <ChevronRight className="w-4 h-4" />
         </button>
-      </div>
-    );
-  };
-
-  const NLBPagination = () => {
-    const totalPages = nlbTotal ? Math.max(1, Math.ceil(nlbTotal / pageSize)) : null;
-    const windowSize = 9;
-    const half = Math.floor(windowSize / 2);
-
-    const start = totalPages
-      ? Math.max(1, Math.min(nlbPage - half, totalPages - windowSize + 1))
-      : Math.max(1, nlbPage - half);
-    const end = totalPages ? Math.min(totalPages, start + windowSize - 1) : nlbPage + half;
-
-    const pages = [];
-    for (let i = start; i <= end; i++) pages.push(i);
-
-    return (
-      <div className="flex items-center justify-center gap-2 mt-6 flex-wrap">
-        <button onClick={() => setNlbPage(1)} disabled={nlbPage === 1} className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50">
-          <ChevronsLeft className="w-4 h-4" />
-        </button>
-        <button onClick={() => setNlbPage(Math.max(1, nlbPage - 1))} disabled={nlbPage === 1} className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50">
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-
-        {start > 1 && (
-          <button onClick={() => setNlbPage(Math.max(1, nlbPage - windowSize))} className="px-3 py-2 border rounded-lg hover:bg-gray-50">
-            <MoreHorizontal className="w-4 h-4" />
-          </button>
-        )}
-
-        {pages.map((pageNum) => (
-          <button
-            key={pageNum}
-            onClick={() => setNlbPage(pageNum)}
-            className={`px-3 py-2 border rounded-lg ${pageNum === nlbPage ? 'bg-black text-white border-black' : 'hover:bg-gray-50'}`}
-          >
-            {pageNum}
-          </button>
-        ))}
-
-        {(totalPages ? end < totalPages : nlbHasMore) && (
-          <button onClick={() => setNlbPage(nlbPage + windowSize)} className="px-3 py-2 border rounded-lg hover:bg-gray-50">
-            <MoreHorizontal className="w-4 h-4" />
-          </button>
-        )}
-
-        <button onClick={() => setNlbPage(nlbPage + 1)} disabled={totalPages ? nlbPage >= totalPages : !nlbHasMore} className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50">
-          <ChevronRight className="w-4 h-4" />
-        </button>
-        {totalPages && (
-          <button onClick={() => setNlbPage(totalPages)} disabled={nlbPage === totalPages} className="px-3 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50">
-            <ChevronsRight className="w-4 h-4" />
-          </button>
-        )}
       </div>
     );
   };
@@ -1553,34 +1431,7 @@ export default function DiscoverPage() {
           <button onClick={() => handleModeChange('collection-videos')} disabled={!canAccessContent('video')} className={`px-4 py-2 rounded-lg ${mode === 'collection-videos' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} ${!canAccessContent('video') ? 'opacity-50 cursor-not-allowed' : ''}`}>
             Our Video Collection
           </button>
-          <button onClick={() => handleModeChange('nlb-books')} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${mode === 'nlb-books' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-            <Library className="w-4 h-4" />
-            NLB Library
-          </button>
         </div>
-
-        {/* NLB Media Type Filter */}
-        {mode === 'nlb-books' && (
-          <div className="flex flex-wrap gap-2 mb-4">
-            <span className="text-sm text-gray-600 self-center mr-2">Media Type:</span>
-            {(['BOOK', 'EBOOK', 'AUDIOBOOK', 'ALL'] as const).map((type) => (
-              <button
-                key={type}
-                onClick={() => {
-                  setNlbMediaType(type);
-                  setNlbPage(1);
-                }}
-                className={`px-3 py-1.5 rounded-full text-sm border transition-all ${
-                  nlbMediaType === type
-                    ? 'bg-black text-white border-black'
-                    : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
-                }`}
-              >
-                {nlbMediaTypeLabels[type]}
-              </button>
-            ))}
-          </div>
-        )}
 
         {/* Video Category Chips */}
         {mode === 'videos' && (
@@ -1635,33 +1486,14 @@ export default function DiscoverPage() {
         {/* Collection Error Message */}
         {collectionMessage && <div className="text-center py-4 text-red-500 font-medium">{collectionMessage}</div>}
 
-        {/* NLB Empty State */}
-        {mode === 'nlb-books' && !loading && nlbBooks.length === 0 && !searchQuery.trim() && (
-          <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed">
-            <Library className="w-16 h-16 mx-auto mb-4 text-gray-400" />
-            <h3 className="text-lg font-semibold text-gray-700 mb-2">Search Singapore's National Library</h3>
-            <p className="text-gray-600 mb-4">Enter a keyword above to search for books, eBooks, and audiobooks from NLB's collection</p>
-            <div className="text-sm text-gray-500">
-              <p>Try searching for: "Harry Potter", "Science", "Singapore History"</p>
-            </div>
-          </div>
-        )}
-
         {/* Results Grid */}
-        {!loading && getCurrentItems().length > 0 && (
+        {!loading && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-6">
             {getCurrentItems().map((item, index) => {
-              if ((mode === 'books' || mode === 'nlb-books') && isBook(item)) {
+              if (mode === 'books' && isBook(item)) {
                 const book = item as Book;
-                const isNLB = book.id.startsWith('nlb-');
                 return (
-                  <div key={`${book.id}-${index}`} className="group relative border border-gray-200 rounded-xl overflow-hidden hover:shadow-lg transition-all bg-white cursor-pointer" onClick={() => handleContentItemClick(book)}>
-                    {isNLB && (
-                      <div className="absolute top-2 left-2 z-10 bg-purple-600 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
-                        <Library className="w-3 h-3" />
-                        NLB
-                      </div>
-                    )}
+                  <div key={book.id} className="group relative border border-gray-200 rounded-xl overflow-hidden hover:shadow-lg transition-all bg-white cursor-pointer" onClick={() => handleContentItemClick(book)}>
                     {hasActivity(book.id, 'book') && (
                       <div className="absolute top-2 right-2 z-10 bg-green-500 text-white rounded-full p-1.5 shadow-md">
                         <Check className="w-3 h-3" />
@@ -1689,11 +1521,6 @@ export default function DiscoverPage() {
                     <div className="p-3">
                       <h3 className="font-semibold text-sm line-clamp-2 mb-1">{book.title}</h3>
                       <p className="text-xs text-gray-600 line-clamp-1">{book.authors.length > 0 ? book.authors.join(', ') : 'Unknown author'}</p>
-                      {book.nlb?.MediaCode && (
-                        <span className="inline-block mt-2 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded">
-                          {book.nlb.MediaCode}
-                        </span>
-                      )}
                       {book.buckets && book.buckets.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-2">
                           {book.buckets.slice(0, 2).map((bucketItem) => (
@@ -1786,13 +1613,12 @@ export default function DiscoverPage() {
         )}
 
         {/* No Results */}
-        {!loading && getCurrentItems().length === 0 && !collectionMessage && searchQuery.trim() && (
+        {!loading && getCurrentItems().length === 0 && !collectionMessage && (
           <div className="text-center py-8 text-gray-600">
             {mode === 'books' && 'No books found.'}
             {mode === 'videos' && 'No videos found.'}
             {mode === 'collection-books' && 'No books found in our collection.'}
             {mode === 'collection-videos' && 'No videos found in our collection.'}
-            {mode === 'nlb-books' && 'No books found in NLB catalog. Try different keywords.'}
           </div>
         )}
 
@@ -1801,7 +1627,6 @@ export default function DiscoverPage() {
           <>
             {mode === 'books' && books.length > 0 && <BooksPagination />}
             {mode === 'videos' && videos.length > 0 && <VideosPagination />}
-            {mode === 'nlb-books' && nlbBooks.length > 0 && <NLBPagination />}
           </>
         )}
       </div>
@@ -1823,17 +1648,6 @@ export default function DiscoverPage() {
                     {isBook(selectedItem) && selectedItem.categories?.length && <p className="text-[11px] text-gray-500 mt-1">{selectedItem.categories.join(', ')}</p>}
                     {isContentItem(selectedItem) && selectedItem.categories?.length && <p className="text-[11px] text-gray-500 mt-1">{selectedItem.categories.join(', ')}</p>}
 
-                    {isBook(selectedItem) && selectedItem.nlb && (
-                      <div className="mt-2 space-y-1">
-                        <div className="inline-flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
-                          <Library className="w-3 h-3" />
-                          NLB {selectedItem.nlb.MediaCode}
-                        </div>
-                        {selectedItem.nlb.Publisher && <p className="text-xs text-gray-500">{selectedItem.nlb.Publisher} {selectedItem.nlb.PublishYear && `(${selectedItem.nlb.PublishYear})`}</p>}
-                        {selectedItem.nlb.CallNumber && <p className="text-xs text-gray-500">Call #: {selectedItem.nlb.CallNumber}</p>}
-                      </div>
-                    )}
-
                     {((isBook(selectedItem) && hasActivity(selectedItem.id, 'book')) || (isContentItem(selectedItem) && hasActivity(selectedItem.id, 'book'))) && (
                       <div className="mt-2 inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
                         <Check className="w-3 h-3" />
@@ -1847,7 +1661,7 @@ export default function DiscoverPage() {
                   {isBook(selectedItem) ? (selectedItem.snippet ?? selectedItem.synopsis ?? 'No description available.') : isContentItem(selectedItem) ? (selectedItem.synopsis || 'No description available.') : 'No description available.'}
                 </p>
 
-                {isBook(selectedItem) && selectedItem.id && !selectedItem.id.startsWith('nlb-') && canAccessContent('book') && (
+                {isBook(selectedItem) && selectedItem.id && canAccessContent('book') && (
                   <div className="mb-4">
                     <button onClick={() => { setShowPreview(s => !s); if (!showPreview) startSession('book'); else endSession(updateUsage); }} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50">
                       {showPreview ? 'Hide preview' : 'Read sample'}
@@ -1889,7 +1703,7 @@ export default function DiscoverPage() {
 
                 {isBook(selectedItem) && bestBookUrl(selectedItem) && canAccessContent('book') && (
                   <a href={bestBookUrl(selectedItem)!} target="_blank" rel="noopener" onClick={() => { if (user && screenTimeSettings?.enabled) updateUsage(user.uid, 'book', 5); }} className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 mb-3">
-                    {selectedItem.nlb ? 'View on NLB Catalog' : 'View on Google Books'}
+                    View on Google Books
                     <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                       <path d="M12.293 2.293a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L14 5.414V14a1 1 0 11-2 0V5.414L9.707 7.707A1 1 0 118.293 6.293l4-4z" />
                       <path d="M3 9a1 1 0 011-1h4a1 1 0 110 2H5v6h10v-3a1 1 0 112 0v4a1 1 0 01-1 1H4a1 1 0 01-1-1V9z" />
@@ -1986,13 +1800,13 @@ export default function DiscoverPage() {
                     </button>
                   )}
 
-                  <button onClick={() => toggleFavourite(selectedItem, (mode === 'books' || mode === 'collection-books' || mode === 'nlb-books') ? 'book' : 'video')} className={`px-3 py-1 rounded-lg border ${!canAccessContent((mode === 'books' || mode === 'collection-books' || mode === 'nlb-books') ? 'book' : 'video') ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={!canAccessContent((mode === 'books' || mode === 'collection-books' || mode === 'nlb-books') ? 'book' : 'video')}>
-                    {isFavourite(getItemId(selectedItem), (mode === 'books' || mode === 'collection-books' || mode === 'nlb-books') ? 'book' : 'video') ? '★ Remove Favourite' : '☆ Add Favourite'}
+                  <button onClick={() => toggleFavourite(selectedItem, (mode === 'books' || mode === 'collection-books') ? 'book' : 'video')} className={`px-3 py-1 rounded-lg border ${!canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={!canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video')}>
+                    {isFavourite(getItemId(selectedItem), (mode === 'books' || mode === 'collection-books') ? 'book' : 'video') ? '★ Remove Favourite' : '☆ Add Favourite'}
                   </button>
-                  <button onClick={handleLeaveReview} className={`px-3 py-1 rounded-lg border text-green-600 ${!canAccessContent((mode === 'books' || mode === 'collection-books' || mode === 'nlb-books') ? 'book' : 'video') ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={!canAccessContent((mode === 'books' || mode === 'collection-books' || mode === 'nlb-books') ? 'book' : 'video')}>
+                  <button onClick={handleLeaveReview} className={`px-3 py-1 rounded-lg border text-green-600 ${!canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={!canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video')}>
                     Leave Comment
                   </button>
-                  <button onClick={() => reportContent(selectedItem, (mode === 'books' || mode === 'collection-books' || mode === 'nlb-books') ? 'book' : 'video')} className="px-3 py-1 rounded-lg border text-red-600">
+                  <button onClick={() => reportContent(selectedItem, (mode === 'books' || mode === 'collection-books') ? 'book' : 'video')} className="px-3 py-1 rounded-lg border text-red-600">
                     Report Content
                   </button>
                 </>
@@ -2008,14 +1822,14 @@ export default function DiscoverPage() {
                     <div className="flex justify-between items-start mb-2">
                       <strong>{r.userName}</strong>
                       <div className="flex items-center gap-2">
-                        {user && user.uid !== r.userId && canAccessContent((mode === 'books' || mode === 'collection-books' || mode === 'nlb-books') ? 'book' : 'video') && (
+                        {user && user.uid !== r.userId && canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') && (
                           <button onClick={() => toggleReviewHeart(r.id, r.userId)} className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs transition-colors ${hasUserHearted(r.id) ? 'bg-red-100 text-red-600 hover:bg-red-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`} title={hasUserHearted(r.id) ? 'Remove heart' : 'Heart this comment'}>
                             {hasUserHearted(r.id) ? '❤️' : '🤍'}
                             <span>{getHeartCount(r.id)}</span>
                           </button>
                         )}
 
-                        {(!user || user.uid === r.userId || !canAccessContent((mode === 'books' || mode === 'collection-books' || mode === 'nlb-books') ? 'book' : 'video')) && getHeartCount(r.id) > 0 && (
+                        {(!user || user.uid === r.userId || !canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video')) && getHeartCount(r.id) > 0 && (
                           <div className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600">
                             ❤️
                             <span>{getHeartCount(r.id)}</span>
@@ -2045,7 +1859,7 @@ export default function DiscoverPage() {
                 <p className="text-sm text-gray-500">No comment yet.</p>
               )}
 
-              {user && canAccessContent((mode === 'books' || mode === 'collection-books' || mode === 'nlb-books') ? 'book' : 'video') ? (
+              {user && canAccessContent((mode === 'books' || mode === 'collection-books') ? 'book' : 'video') ? (
                 <div className="mt-2">
                   <textarea ref={reviewRef} value={reviewContent} onChange={(e) => setReviewContent(e.target.value)} placeholder="Write a review…" className="w-full border rounded-lg p-2 text-sm" />
                   <button onClick={submitReview} className="mt-1 px-3 py-1 bg-[#111] text-white rounded-lg">
