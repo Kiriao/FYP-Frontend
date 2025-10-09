@@ -3,7 +3,7 @@
 import React from "react";
 import Script from "next/script";
 
-// Utility: create elements safely for TS
+// Safely create custom elements for TS
 const DFMessenger = (props: any) => React.createElement("df-messenger", props);
 const DFBubble = (props: any) =>
   React.createElement("df-messenger-chat-bubble", props);
@@ -38,7 +38,7 @@ export default function DialogflowMessenger() {
 
   const SESSION_KEY = "kidflix_df_session_id";
 
-  // Setup session ID
+  // Setup session ID once per tab
   React.useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -49,7 +49,7 @@ export default function DialogflowMessenger() {
     }
     setSessionId(sid);
 
-    // expose a reset function in dev tools
+    // Expose a dev helper
     (window as any).resetKidflixChat = () => {
       clearDfStorage();
       const fresh = newSessionId();
@@ -58,7 +58,6 @@ export default function DialogflowMessenger() {
     };
   }, []);
 
-  // Ensure Messenger script loaded properly
   const handleScriptLoad = () => {
     console.log("✅ Dialogflow script loaded");
     setReady(true);
@@ -66,26 +65,42 @@ export default function DialogflowMessenger() {
 
   return (
     <>
-      {/* --- Trusted Types shim for Dialogflow --- */}
+      {/* --- Trusted Types shim (fixes createScriptURL issue) --- */}
       <Script
         id="df-tt-shim"
         strategy="beforeInteractive"
         dangerouslySetInnerHTML={{
           __html: `
-            (function(){
+            (function() {
               try {
                 if (!window.trustedTypes) {
                   window.trustedTypes = {
-                    createPolicy: function(_name, rules) { return rules; }
+                    createPolicy: function(name, rules) {
+                      return {
+                        createHTML: rules.createHTML || ((x) => x),
+                        createScript: rules.createScript || ((x) => x),
+                        createScriptURL: rules.createScriptURL || ((x) => x)
+                      };
+                    }
+                  };
+                } else if (!window.trustedTypes.createPolicy) {
+                  window.trustedTypes.createPolicy = function(name, rules) {
+                    return {
+                      createHTML: rules.createHTML || ((x) => x),
+                      createScript: rules.createScript || ((x) => x),
+                      createScriptURL: rules.createScriptURL || ((x) => x)
+                    };
                   };
                 }
-              } catch(e){}
+              } catch(e) {
+                console.error("Trusted Types shim error", e);
+              }
             })();
           `,
         }}
       />
 
-      {/* --- Dialogflow Messenger styles --- */}
+      {/* --- Dialogflow Messenger stylesheet --- */}
       <link
         rel="stylesheet"
         href="https://www.gstatic.com/dialogflow-console/fast/df-messenger/prod/v1/themes/df-messenger-default.css"
@@ -99,7 +114,7 @@ export default function DialogflowMessenger() {
         onLoad={handleScriptLoad}
       />
 
-      {/* --- Render chat widget only when ready --- */}
+      {/* --- Render the widget once script is ready --- */}
       {ready && sessionId && (
         <DFMessenger
           key={sessionId}

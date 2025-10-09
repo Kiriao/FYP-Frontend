@@ -28,7 +28,6 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <ClientLayout>{children}</ClientLayout>
-        {/* 👇 Always rendered globally */}
         <DialogflowMessenger />
       </body>
     </html>
