@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from "react";
-import { auth } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { Mail, ArrowLeft, Loader2, AlertCircle, CheckCircle2, KeyRound } from "lucide-react";
 
@@ -14,6 +15,8 @@ export default function ForgotPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
 
+  // Alternative method: Check if email exists by trying to get user document by ID
+  // We'll try a different approach - send the email and handle the Firebase response
   const handlePasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage("");
@@ -21,24 +24,35 @@ export default function ForgotPasswordPage() {
     setLoading(true);
 
     try {
+      // Step 1: Try to send the password reset email
       await sendPasswordResetEmail(auth, email);
+      
+      // If we reach here, email was sent (or Firebase accepted it)
+      // Firebase won't tell us if email exists for security reasons
       setMessage("Password reset email sent successfully! Check your inbox and spam folder.");
       setEmailSent(true);
       setLoading(false);
     } catch (err: any) {
-      console.error(err);
+      console.error("Password reset error:", err);
+      console.error("Error code:", err.code);
+      console.error("Error message:", err.message);
       
-      // Better error messages
+      // Handle specific Firebase errors
       if (err.code === "auth/user-not-found") {
-        setError("No account found with this email address.");
+        setError("No account found with this email address. Please check your email or sign up for a new account.");
       } else if (err.code === "auth/invalid-email") {
         setError("Please enter a valid email address.");
       } else if (err.code === "auth/too-many-requests") {
-        setError("Too many requests. Please try again later.");
+        setError("Too many attempts. Please try again later.");
       } else if (err.code === "auth/network-request-failed") {
-        setError("Network error. Please check your connection.");
+        setError("Network error. Please check your internet connection.");
+      } else if (err.code === "auth/missing-android-pkg-name" || 
+                 err.code === "auth/missing-continue-uri" || 
+                 err.code === "auth/missing-ios-bundle-id" || 
+                 err.code === "auth/invalid-continue-uri") {
+        setError("Configuration error. Please contact support.");
       } else {
-        setError("Failed to send reset email. Please try again.");
+        setError(`Unable to send reset email: ${err.message}`);
       }
       setLoading(false);
     }
@@ -51,9 +65,10 @@ export default function ForgotPasswordPage() {
 
     try {
       await sendPasswordResetEmail(auth, email);
-      setMessage("Reset email resent! Check your inbox.");
+      setMessage("Reset email sent again! Please check your inbox and spam folder.");
       setLoading(false);
     } catch (err: any) {
+      console.error("Resend error:", err);
       setError("Failed to resend email. Please try again.");
       setLoading(false);
     }
@@ -135,6 +150,11 @@ export default function ForgotPasswordPage() {
                   </>
                 )}
               </button>
+
+              {/* Security Note */}
+              <p className="text-xs text-gray-500 text-center">
+                For security reasons, you'll receive an email only if an account exists with this email address.
+              </p>
             </form>
           ) : (
             <div className="space-y-5">
@@ -152,10 +172,18 @@ export default function ForgotPasswordPage() {
                 <h3 className="text-sm font-semibold text-blue-900 mb-2">Next steps:</h3>
                 <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
                   <li>Check your email inbox for <strong>{email}</strong></li>
-                  <li>Click the reset link in the email</li>
+                  <li>Look in your spam/junk folder if you don't see it</li>
+                  <li>Click the reset link in the email (it expires in 1 hour)</li>
                   <li>Create a new password</li>
                   <li>Log in with your new password</li>
                 </ol>
+              </div>
+
+              {/* Important Note */}
+              <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-lg">
+                <p className="text-xs text-yellow-800">
+                  <strong>Note:</strong> If you don't receive an email within 5 minutes, the email address may not be registered in our system.
+                </p>
               </div>
 
               {/* Didn't receive email section */}
