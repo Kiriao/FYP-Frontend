@@ -65,6 +65,8 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [userToDelete, setUserToDelete] = useState<{uid: string, name: string} | null>(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [dateRange, setDateRange] = useState({ start: "", end: "" });
+  const [includeFreePlan, setIncludeFreePlan] = useState(true);
   const [editForm, setEditForm] = useState({
     fullName: "",
     email: "",
@@ -227,31 +229,71 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
     setLoadingInvoices(true);
     try {
       const selectedUsersList = Array.from(selectedUsers);
-      
+      let successCount = 0;
+      let errorCount = 0;
+      let skippedCount = 0;
+
       for (const userId of selectedUsersList) {
-        const user = users.find(u => u.uid === userId);
-        if (!user) continue;
+        try {
+          const user = users.find(u => u.uid === userId);
+          if (!user) continue;
 
-        // Fetch subscriptions for this user
-        const q = query(
-          collection(db, "subscriptions"),
-          where("userId", "==", userId),
-          orderBy("createdAt", "desc")
-        );
-        const snapshot = await getDocs(q);
-        const subscriptions = snapshot.docs.map((doc) => doc.data() as Subscription);
+          // Skip Free Plan users if not included
+          if (!includeFreePlan && user.plan === "Free Plan") {
+            skippedCount++;
+            continue;
+          }
 
-        // Generate PDF
-        const pdf = await generateInvoiceForUser(user, subscriptions);
-        pdf.save(`invoice_${user.fullName.replace(/\s+/g, '_')}_${Date.now()}.pdf`);
+          // Fetch subscriptions for this user
+          let q = query(
+            collection(db, "subscriptions"),
+            where("userId", "==", userId),
+            orderBy("createdAt", "desc")
+          );
+          
+          const snapshot = await getDocs(q);
+          let subscriptions = snapshot.docs.map((doc) => doc.data() as Subscription);
 
-        // Add small delay between downloads
-        await new Promise(resolve => setTimeout(resolve, 500));
+          // Filter by date range if specified
+          if (dateRange.start || dateRange.end) {
+            subscriptions = subscriptions.filter(sub => {
+              const subDate = sub.createdAt?.toDate ? sub.createdAt.toDate() : new Date(sub.createdAt);
+              const start = dateRange.start ? new Date(dateRange.start) : null;
+              const end = dateRange.end ? new Date(dateRange.end) : null;
+              
+              if (start && subDate < start) return false;
+              if (end && subDate > end) return false;
+              return true;
+            });
+          }
+
+          // Generate PDF
+          const pdf = await generateInvoiceForUser(user, subscriptions);
+          pdf.save(`invoice_${user.fullName.replace(/\s+/g, '_')}_${Date.now()}.pdf`);
+
+          successCount++;
+          // Add small delay between downloads
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (error) {
+          console.error(`Error generating invoice for user ${userId}:`, error);
+          errorCount++;
+        }
       }
 
-      alert(`Successfully exported ${selectedUsers.size} invoice(s)!`);
+      let message = `Successfully exported ${successCount} invoice(s)!`;
+      if (skippedCount > 0) {
+        message += ` (Skipped ${skippedCount} Free Plan user${skippedCount !== 1 ? 's' : ''})`;
+      }
+      if (errorCount > 0) {
+        message += ` ${errorCount} failed.`;
+      }
+      
+      alert(message);
+      
       setSelectedUsers(new Set());
       setShowInvoiceModal(false);
+      setDateRange({ start: "", end: "" });
+      setIncludeFreePlan(true);
     } catch (error) {
       console.error("Error generating invoices:", error);
       alert("Failed to generate invoices. Please try again.");
@@ -271,12 +313,16 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
     setSelectedUsers(newSelected);
   };
 
-  // Select all filtered users
+  // Select all filtered users (respecting the Free Plan filter in modal)
   const selectAllUsers = () => {
-    if (selectedUsers.size === filteredUsers.length) {
+    const visibleUsers = filteredUsers.filter(user => includeFreePlan || user.plan !== "Free Plan");
+    const visibleUserIds = visibleUsers.map(u => u.uid);
+    const allVisible = visibleUserIds.every(uid => selectedUsers.has(uid));
+    
+    if (allVisible && selectedUsers.size === visibleUserIds.length) {
       setSelectedUsers(new Set());
     } else {
-      setSelectedUsers(new Set(filteredUsers.map(u => u.uid)));
+      setSelectedUsers(new Set(visibleUserIds));
     }
   };
 
@@ -391,32 +437,6 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
     }
   };
 
-  const exportToCSV = () => {
-    const headers = ["Name", "Email", "Role", "Plan", "Created At"];
-    const csvData = filteredUsers.map(u => {
-      const createdDate = getDateFromTimestamp(u.createdAt);
-      return [
-        u.fullName,
-        u.email,
-        u.role || "user",
-        u.plan || "Free Plan",
-        createdDate ? createdDate.toLocaleDateString() : "N/A"
-      ];
-    });
-
-    const csv = [
-      headers.join(","),
-      ...csvData.map(row => row.map(cell => `"${cell}"`).join(","))
-    ].join("\n");
-
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `users_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-  };
-
   // Filter users based on search and filters
   const filteredUsers = users.filter(user => {
     const matchesSearch = 
@@ -523,13 +543,6 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
           >
             <FileText className="w-4 h-4" />
             Export Invoices
-          </button>
-          <button
-            onClick={exportToCSV}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            Export CSV
           </button>
         </div>
       </div>
@@ -737,25 +750,78 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
             </div>
 
             <div className="p-6 max-h-[60vh] overflow-y-auto">
+              {/* Export Options */}
+              <div className="mb-6 p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg border border-purple-200">
+                <h4 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                  <Filter className="w-4 h-4" />
+                  Export Options
+                </h4>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Include Free Plan */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Plan Filter
+                    </label>
+                    <label className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg cursor-pointer hover:border-purple-300">
+                      <input
+                        type="checkbox"
+                        checked={includeFreePlan}
+                        onChange={(e) => setIncludeFreePlan(e.target.checked)}
+                        className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                      />
+                      <span className="text-sm text-gray-700">Include Free Plan users</span>
+                    </label>
+                  </div>
+
+                  {/* Placeholder for alignment */}
+                  <div></div>
+
+                </div>
+
+                {(dateRange.start || dateRange.end || !includeFreePlan) && (
+                  <div className="mt-3 p-2 bg-blue-50 rounded text-sm text-blue-700 flex items-center gap-2">
+                    <Calendar className="w-4 h-4" />
+                    <div>
+                      {!includeFreePlan && <div>Excluding Free Plan users</div>}
+                      {dateRange.start && dateRange.end 
+                        ? `Date range: ${new Date(dateRange.start).toLocaleDateString()} - ${new Date(dateRange.end).toLocaleDateString()}`
+                        : dateRange.start 
+                        ? `From: ${new Date(dateRange.start).toLocaleDateString()}`
+                        : dateRange.end
+                        ? `Until: ${new Date(dateRange.end).toLocaleDateString()}`
+                        : ""
+                      }
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* User Selection */}
               <div className="flex justify-between items-center mb-4">
                 <button
                   onClick={selectAllUsers}
                   className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
                 >
-                  {selectedUsers.size === filteredUsers.length ? (
-                    <CheckSquare className="w-4 h-4" />
-                  ) : (
-                    <Square className="w-4 h-4" />
-                  )}
-                  {selectedUsers.size === filteredUsers.length ? "Deselect All" : "Select All"}
+                  {(() => {
+                    const visibleUsers = filteredUsers.filter(user => includeFreePlan || user.plan !== "Free Plan");
+                    const allSelected = visibleUsers.length > 0 && visibleUsers.every(u => selectedUsers.has(u.uid));
+                    return allSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />;
+                  })()}
+                  {(() => {
+                    const visibleUsers = filteredUsers.filter(user => includeFreePlan || user.plan !== "Free Plan");
+                    const allSelected = visibleUsers.length > 0 && visibleUsers.every(u => selectedUsers.has(u.uid));
+                    return allSelected ? "Deselect All" : "Select All";
+                  })()}
                 </button>
                 <span className="text-sm text-gray-600">
                   {selectedUsers.size} user{selectedUsers.size !== 1 ? 's' : ''} selected
+                  {!includeFreePlan && ` (${filteredUsers.filter(u => u.plan !== "Free Plan").length} shown)`}
                 </span>
               </div>
 
               <div className="space-y-2">
-                {filteredUsers.map(user => (
+                {filteredUsers.filter(user => includeFreePlan || user.plan !== "Free Plan").map(user => (
                   <div
                     key={user.uid}
                     onClick={() => toggleUserSelection(user.uid)}
@@ -817,7 +883,7 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
                 ) : (
                   <>
                     <Download className="w-4 h-4" />
-                    Export {selectedUsers.size} Invoice{selectedUsers.size !== 1 ? 's' : ''}
+                    Export {selectedUsers.size} PDF Invoice{selectedUsers.size !== 1 ? 's' : ''}
                   </>
                 )}
               </button>
