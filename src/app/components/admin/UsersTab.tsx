@@ -59,6 +59,7 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
+  const [showSuccessMessage, setShowSuccessMessage] = useState(false);
   const [editForm, setEditForm] = useState({
     fullName: "",
     email: "",
@@ -317,9 +318,27 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
       await updateDoc(doc(db, "users", editingUser.uid), editForm);
       setUsers(prev => prev.map(u => u.uid === editingUser.uid ? { ...u, ...editForm } : u));
       setEditingUser(null);
+      setShowSuccessMessage(true);
+      setTimeout(() => setShowSuccessMessage(false), 3000);
     } catch (error) {
       console.error("Error updating user:", error);
       alert("Failed to update user. Please try again.");
+    }
+  };
+
+  const handleCancelEdit = () => {
+    const hasChanges = 
+      editForm.fullName !== editingUser?.fullName ||
+      editForm.email !== editingUser?.email ||
+      editForm.role !== (editingUser?.role || "user") ||
+      editForm.plan !== (editingUser?.plan || (plans.length > 0 ? plans[0].name : "Free Plan"));
+
+    if (hasChanges) {
+      if (confirm("You have unsaved changes. Are you sure you want to cancel?")) {
+        setEditingUser(null);
+      }
+    } else {
+      setEditingUser(null);
     }
   };
 
@@ -418,6 +437,18 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
 
   return (
     <section className="space-y-6">
+      {/* Success Message */}
+      {showSuccessMessage && (
+        <div className="fixed top-4 right-4 z-50 bg-green-500 text-white px-6 py-4 rounded-lg shadow-lg flex items-center gap-3 animate-fade-in">
+          <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center">
+            <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <span className="font-semibold">User details updated successfully!</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
@@ -733,7 +764,7 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
               <div className="flex justify-between items-center">
                 <h3 className="text-2xl font-bold">Edit User</h3>
                 <button
-                  onClick={() => setEditingUser(null)}
+                  onClick={handleCancelEdit}
                   className="p-1 hover:bg-white hover:bg-opacity-20 rounded-lg transition-colors"
                 >
                   <X className="w-6 h-6" />
@@ -810,7 +841,7 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
 
             <div className="flex justify-end gap-3 px-6 pb-6">
               <button
-                onClick={() => setEditingUser(null)}
+                onClick={handleCancelEdit}
                 className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-semibold"
               >
                 Cancel
