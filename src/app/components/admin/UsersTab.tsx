@@ -60,6 +60,11 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+  const [showDeleteMessage, setShowDeleteMessage] = useState(false);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<{uid: string, name: string} | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [editForm, setEditForm] = useState({
     fullName: "",
     email: "",
@@ -275,16 +280,60 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
     }
   };
 
-  const handleDeleteUser = async (uid: string, userName: string) => {
-    if (!confirm(`Are you sure you want to delete ${userName}? This action cannot be undone.`)) {
+  const handleDeleteUser = async (uid: string, userName: string, userRole?: string) => {
+    // Prevent deleting admin users
+    if (userRole === "admin") {
+      alert("⚠️ Admin users cannot be deleted for security reasons. Please change their role first if you want to remove them.");
       return;
     }
+    
+    setUserToDelete({ uid, name: userName });
+    setShowDeleteModal(true);
+    setDeleteConfirmText("");
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!userToDelete) return;
+    
+    // Require typing "DELETE" to confirm
+    if (deleteConfirmText !== "DELETE") {
+      alert("Please type DELETE to confirm deletion");
+      return;
+    }
+
+    setDeletingUserId(userToDelete.uid);
+    
     try {
-      await deleteDoc(doc(db, "users", uid));
-      setUsers(prev => prev.filter(u => u.uid !== uid));
+      // Delete user document
+      await deleteDoc(doc(db, "users", userToDelete.uid));
+      
+      // Optional: Delete related data (subscriptions, etc.)
+      const subscriptionsQuery = query(
+        collection(db, "subscriptions"),
+        where("userId", "==", userToDelete.uid)
+      );
+      const subscriptionsSnapshot = await getDocs(subscriptionsQuery);
+      
+      // Delete all user subscriptions
+      const deletePromises = subscriptionsSnapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deletePromises);
+      
+      // Update state
+      setUsers(prev => prev.filter(u => u.uid !== userToDelete.uid));
+      
+      // Show success message
+      setShowDeleteMessage(true);
+      setTimeout(() => setShowDeleteMessage(false), 3000);
+      
+      // Close modal and reset
+      setShowDeleteModal(false);
+      setUserToDelete(null);
+      setDeleteConfirmText("");
     } catch (error) {
       console.error("Error deleting user:", error);
       alert("Failed to delete user. Please try again.");
+    } finally {
+      setDeletingUserId(null);
     }
   };
 
@@ -446,6 +495,18 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
             </svg>
           </div>
           <span className="font-semibold">User details updated successfully!</span>
+        </div>
+      )}
+
+      {/* Delete Success Message */}
+      {showDeleteMessage && (
+        <div className="fixed top-4 right-4 z-50 bg-red-500 text-white px-6 py-4 rounded-lg shadow-lg flex items-center gap-3 animate-fade-in">
+          <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center">
+            <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <span className="font-semibold">User deleted successfully!</span>
         </div>
       )}
 
@@ -628,11 +689,20 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleDeleteUser(u.uid, u.fullName)}
-                          className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"
-                          title="Delete"
+                          onClick={() => handleDeleteUser(u.uid, u.fullName, u.role)}
+                          disabled={deletingUserId === u.uid || u.role === "admin"}
+                          className={`p-2 rounded-lg transition-colors ${
+                            u.role === "admin" 
+                              ? "bg-gray-100 text-gray-400 cursor-not-allowed" 
+                              : "bg-red-100 text-red-600 hover:bg-red-200"
+                          } disabled:opacity-50`}
+                          title={u.role === "admin" ? "Admin users cannot be deleted" : "Delete"}
                         >
-                          <Trash2 className="w-4 h-4" />
+                          {deletingUserId === u.uid ? (
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-600"></div>
+                          ) : (
+                            <Trash2 className="w-4 h-4" />
+                          )}
                         </button>
                       </div>
                     </td>
@@ -748,6 +818,107 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
                   <>
                     <Download className="w-4 h-4" />
                     Export {selectedUsers.size} Invoice{selectedUsers.size !== 1 ? 's' : ''}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && userToDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md transform transition-all">
+            <div className="bg-gradient-to-r from-red-600 to-red-700 text-white p-6 rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold">Delete User</h3>
+                  <p className="text-red-100 text-sm">This action cannot be undone</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                <div className="flex items-start gap-3">
+                  <svg className="w-5 h-5 text-red-500 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <div>
+                    <p className="font-semibold text-red-800">Warning: Permanent Deletion</p>
+                    <p className="text-sm text-red-700 mt-1">
+                      You are about to delete <span className="font-bold">{userToDelete.name}</span>. 
+                      This will permanently remove:
+                    </p>
+                    <ul className="text-sm text-red-700 mt-2 space-y-1 list-disc list-inside">
+                      <li>User account and profile</li>
+                      <li>All subscription records</li>
+                      <li>Associated payment history</li>
+                      <li>User preferences and settings</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-pink-400 to-purple-400 rounded-full flex items-center justify-center text-white font-semibold">
+                    {userToDelete.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800">{userToDelete.name}</p>
+                    <p className="text-sm text-gray-500">User ID: {userToDelete.uid.substring(0, 12)}...</p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Type <span className="text-red-600 font-bold">DELETE</span> to confirm
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder="Type DELETE here"
+                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  autoFocus
+                />
+                <p className="text-xs text-gray-500 mt-2">
+                  This confirmation helps prevent accidental deletions
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 px-6 pb-6">
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setUserToDelete(null);
+                  setDeleteConfirmText("");
+                }}
+                className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteUser}
+                disabled={deleteConfirmText !== "DELETE" || deletingUserId !== null}
+                className="flex items-center gap-2 px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deletingUserId ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    Delete User
                   </>
                 )}
               </button>
