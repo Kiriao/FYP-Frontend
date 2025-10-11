@@ -15,7 +15,8 @@ import {
   MessageSquare,
   TrendingUp,
   Home,
-  Download
+  Download,
+  X
 } from 'lucide-react';
 
 interface ReviewData {
@@ -36,6 +37,11 @@ export default function ReviewsTab({ reviews, fetchReviews }: ReviewsTabProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<"all" | "shown" | "hidden">("all");
   const [selectedReview, setSelectedReview] = useState<ReviewData | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [reviewToDelete, setReviewToDelete] = useState<ReviewData | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deletingReviewId, setDeletingReviewId] = useState<string | null>(null);
+  const [showDeleteMessage, setShowDeleteMessage] = useState(false);
 
   // Helper function to safely convert timestamp to date
   const getDateFromTimestamp = (timestamp: any): Date | null => {
@@ -62,43 +68,41 @@ export default function ReviewsTab({ reviews, fetchReviews }: ReviewsTabProps) {
     }
   };
 
-  const handleDeleteReview = async (id: string, userName: string) => {
-    if (!confirm(`Are you sure you want to delete the review by ${userName}? This action cannot be undone.`)) {
+  const handleDeleteReview = (review: ReviewData) => {
+    setReviewToDelete(review);
+    setShowDeleteModal(true);
+    setDeleteConfirmText("");
+  };
+
+  const confirmDeleteReview = async () => {
+    if (!reviewToDelete) return;
+    
+    // Require typing "DELETE" to confirm
+    if (deleteConfirmText !== "DELETE") {
+      alert("Please type DELETE to confirm deletion");
       return;
     }
+
+    setDeletingReviewId(reviewToDelete.uid);
+    
     try {
-      await deleteDoc(doc(db, "reviews", id));
+      await deleteDoc(doc(db, "reviews", reviewToDelete.uid));
       fetchReviews();
+      
+      // Show success message
+      setShowDeleteMessage(true);
+      setTimeout(() => setShowDeleteMessage(false), 3000);
+      
+      // Close modal and reset
+      setShowDeleteModal(false);
+      setReviewToDelete(null);
+      setDeleteConfirmText("");
     } catch (error) {
       console.error("Error deleting review:", error);
       alert("Failed to delete review. Please try again.");
+    } finally {
+      setDeletingReviewId(null);
     }
-  };
-
-  const exportToCSV = () => {
-    const headers = ["User Name", "Message", "Show on Home", "Rating", "Created At"];
-    const csvData = filteredReviews.map(r => {
-      const createdDate = getDateFromTimestamp(r.createdAt);
-      return [
-        r.userName,
-        r.message.replace(/"/g, '""'), // Escape quotes in message
-        r.showOnHome ? "Yes" : "No",
-        r.rating || "N/A",
-        createdDate ? createdDate.toLocaleDateString() : "N/A"
-      ];
-    });
-
-    const csv = [
-      headers.join(","),
-      ...csvData.map(row => row.map(cell => `"${cell}"`).join(","))
-    ].join("\n");
-
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `reviews_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
   };
 
   // Filter reviews
@@ -145,19 +149,24 @@ export default function ReviewsTab({ reviews, fetchReviews }: ReviewsTabProps) {
 
   return (
     <section className="space-y-6">
+      {/* Delete Success Message */}
+      {showDeleteMessage && (
+        <div className="fixed top-4 right-4 z-50 bg-red-500 text-white px-6 py-4 rounded-lg shadow-lg flex items-center gap-3 animate-fade-in">
+          <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center">
+            <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <span className="font-semibold">Review deleted successfully!</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-3xl font-bold text-gray-800">Reviews Management</h2>
           <p className="text-gray-600 mt-1">Manage customer reviews and testimonials</p>
         </div>
-        <button
-          onClick={exportToCSV}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-        >
-          <Download className="w-4 h-4" />
-          Export CSV
-        </button>
       </div>
 
       {/* Statistics Cards */}
@@ -317,10 +326,15 @@ export default function ReviewsTab({ reviews, fetchReviews }: ReviewsTabProps) {
                     </button>
                     
                     <button
-                      onClick={() => handleDeleteReview(r.uid, r.userName)}
-                      className="flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors font-medium"
+                      onClick={() => handleDeleteReview(r)}
+                      disabled={deletingReviewId === r.uid}
+                      className="flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors font-medium disabled:opacity-50"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      {deletingReviewId === r.uid ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-700"></div>
+                      ) : (
+                        <Trash2 className="w-4 h-4" />
+                      )}
                       Delete
                     </button>
                   </div>
@@ -330,6 +344,106 @@ export default function ReviewsTab({ reviews, fetchReviews }: ReviewsTabProps) {
           ))
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && reviewToDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md transform transition-all">
+            <div className="bg-gradient-to-r from-red-600 to-red-700 text-white p-6 rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold">Delete Review</h3>
+                  <p className="text-red-100 text-sm">This action cannot be undone</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                <div className="flex items-start gap-3">
+                  <svg className="w-5 h-5 text-red-500 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <div>
+                    <p className="font-semibold text-red-800">Warning: Permanent Deletion</p>
+                    <p className="text-sm text-red-700 mt-1">
+                      You are about to delete the review by <span className="font-bold">{reviewToDelete.userName}</span>. 
+                      This will permanently remove this review from your database.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-pink-400 to-purple-400 rounded-full flex items-center justify-center text-white font-semibold">
+                    {reviewToDelete.userName.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800">{reviewToDelete.userName}</p>
+                    <div className="flex items-center gap-2">
+                      {renderStars(reviewToDelete.rating)}
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-white p-3 rounded border border-gray-200">
+                  <p className="text-sm text-gray-700 line-clamp-3">{reviewToDelete.message}</p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Type <span className="text-red-600 font-bold">DELETE</span> to confirm
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder="Type DELETE here"
+                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  autoFocus
+                />
+                <p className="text-xs text-gray-500 mt-2">
+                  This confirmation helps prevent accidental deletions
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 px-6 pb-6">
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setReviewToDelete(null);
+                  setDeleteConfirmText("");
+                }}
+                className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteReview}
+                disabled={deleteConfirmText !== "DELETE" || deletingReviewId !== null}
+                className="flex items-center gap-2 px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deletingReviewId ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    Delete Review
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Review Details Modal */}
       {selectedReview && (
@@ -342,9 +456,7 @@ export default function ReviewsTab({ reviews, fetchReviews }: ReviewsTabProps) {
                   onClick={() => setSelectedReview(null)}
                   className="p-1 hover:bg-white hover:bg-opacity-20 rounded-lg transition-colors"
                 >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+                  <X className="w-6 h-6" />
                 </button>
               </div>
             </div>
