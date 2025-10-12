@@ -35,6 +35,8 @@ export default function FAQsTab({ faqs, fetchFAQs }: FAQsTabProps) {
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [showAddForm, setShowAddForm] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [validationErrors, setValidationErrors] = useState<{question?: string; answer?: string}>({});
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   
   const [editFAQForm, setEditFAQForm] = useState({
     question: "",
@@ -51,6 +53,71 @@ export default function FAQsTab({ faqs, fetchFAQs }: FAQsTabProps) {
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  // Validation function
+  const validateForm = () => {
+    const errors: {question?: string; answer?: string} = {};
+    
+    if (!editFAQForm.question.trim()) {
+      errors.question = 'Question is required';
+    } else if (editFAQForm.question.trim().length < 10) {
+      errors.question = 'Question must be at least 10 characters';
+    } else if (editFAQForm.question.trim().length > 200) {
+      errors.question = 'Question must be less than 200 characters';
+    }
+    
+    if (!editFAQForm.answer.trim()) {
+      errors.answer = 'Answer is required';
+    } else if (editFAQForm.answer.trim().length < 20) {
+      errors.answer = 'Answer must be at least 20 characters';
+    } else if (editFAQForm.answer.trim().length > 2000) {
+      errors.answer = 'Answer must be less than 2000 characters';
+    }
+    
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  // Handle form changes with validation
+  const handleEditFormChange = (field: 'question' | 'answer' | 'category', value: string) => {
+    setEditFAQForm(prev => ({ ...prev, [field]: value }));
+    setHasUnsavedChanges(true);
+    
+    // Clear specific field error when user starts typing
+    if (validationErrors[field as keyof typeof validationErrors]) {
+      setValidationErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[field as keyof typeof validationErrors];
+        return newErrors;
+      });
+    }
+  };
+
+  // Open edit modal
+  const openEditModal = (faq: FAQItem) => {
+    setEditingFAQ(faq);
+    setEditFAQForm({
+      question: faq.question,
+      answer: faq.answer,
+      category: faq.category || "general"
+    });
+    setHasUnsavedChanges(false);
+    setValidationErrors({});
+  };
+
+  // Handle closing with unsaved changes warning
+  const handleCloseEditModal = () => {
+    if (hasUnsavedChanges) {
+      if (confirm('You have unsaved changes. Are you sure you want to close?')) {
+        setEditingFAQ(null);
+        setHasUnsavedChanges(false);
+        setValidationErrors({});
+      }
+    } else {
+      setEditingFAQ(null);
+      setValidationErrors({});
+    }
   };
 
   const handleAddFAQ = async () => {
@@ -79,7 +146,12 @@ export default function FAQsTab({ faqs, fetchFAQs }: FAQsTabProps) {
     }
   };
 
+  // Improved update function with validation
   const handleUpdateFAQ = async () => {
+    if (!validateForm()) {
+      return;
+    }
+
     if (!editingFAQ) return;
 
     setLoading(true);
@@ -90,6 +162,8 @@ export default function FAQsTab({ faqs, fetchFAQs }: FAQsTabProps) {
       });
 
       setEditingFAQ(null);
+      setHasUnsavedChanges(false);
+      setValidationErrors({});
       fetchFAQs();
       showToast('FAQ updated successfully!', 'success');
     } catch (error) {
@@ -310,14 +384,7 @@ export default function FAQsTab({ faqs, fetchFAQs }: FAQsTabProps) {
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
                     <button
-                      onClick={() => {
-                        setEditingFAQ(faq);
-                        setEditFAQForm({
-                          question: faq.question,
-                          answer: faq.answer,
-                          category: faq.category || "general"
-                        });
-                      }}
+                      onClick={() => openEditModal(faq)}
                       className="p-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg transition-colors"
                       title="Edit FAQ"
                     >
@@ -355,25 +422,33 @@ export default function FAQsTab({ faqs, fetchFAQs }: FAQsTabProps) {
       {editingFAQ && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-2xl font-bold flex items-center gap-2">
-                <Edit2 className="text-pink-600" size={24} />
-                Edit FAQ
-              </h3>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-2xl font-bold flex items-center gap-2">
+                  <Edit2 className="text-pink-600" size={24} />
+                  Edit FAQ
+                </h3>
+                {hasUnsavedChanges && (
+                  <p className="text-sm text-orange-600 mt-1">You have unsaved changes</p>
+                )}
+              </div>
               <button
-                onClick={() => setEditingFAQ(null)}
+                onClick={handleCloseEditModal}
                 className="text-gray-400 hover:text-gray-600 transition-colors"
+                title="Close"
               >
                 <X size={24} />
               </button>
             </div>
             
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Category <span className="text-red-500">*</span>
+                </label>
                 <select
                   value={editFAQForm.category}
-                  onChange={(e) => setEditFAQForm({ ...editFAQForm, category: e.target.value })}
+                  onChange={(e) => handleEditFormChange('category', e.target.value)}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent outline-none"
                 >
                   {CATEGORIES.map(cat => (
@@ -383,36 +458,67 @@ export default function FAQsTab({ faqs, fetchFAQs }: FAQsTabProps) {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Question</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Question <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   value={editFAQForm.question}
-                  onChange={(e) => setEditFAQForm({ ...editFAQForm, question: e.target.value })}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent outline-none"
+                  onChange={(e) => handleEditFormChange('question', e.target.value)}
+                  className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent outline-none ${
+                    validationErrors.question ? 'border-red-500' : 'border-gray-300'
+                  }`}
+                  placeholder="Enter the FAQ question"
                 />
+                <div className="flex justify-between items-center mt-1">
+                  {validationErrors.question && (
+                    <p className="text-sm text-red-600">{validationErrors.question}</p>
+                  )}
+                  <p className={`text-xs ml-auto ${
+                    editFAQForm.question.length > 200 ? 'text-red-600' : 'text-gray-500'
+                  }`}>
+                    {editFAQForm.question.length}/200
+                  </p>
+                </div>
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Answer</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Answer <span className="text-red-500">*</span>
+                </label>
                 <textarea
                   value={editFAQForm.answer}
-                  onChange={(e) => setEditFAQForm({ ...editFAQForm, answer: e.target.value })}
+                  onChange={(e) => handleEditFormChange('answer', e.target.value)}
                   rows={6}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent outline-none resize-none"
+                  className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent outline-none resize-none ${
+                    validationErrors.answer ? 'border-red-500' : 'border-gray-300'
+                  }`}
+                  placeholder="Enter the FAQ answer"
                 />
+                <div className="flex justify-between items-center mt-1">
+                  {validationErrors.answer && (
+                    <p className="text-sm text-red-600">{validationErrors.answer}</p>
+                  )}
+                  <p className={`text-xs ml-auto ${
+                    editFAQForm.answer.length > 2000 ? 'text-red-600' : 'text-gray-500'
+                  }`}>
+                    {editFAQForm.answer.length}/2000
+                  </p>
+                </div>
               </div>
               
-              <div className="flex justify-end gap-3 pt-4">
+              <div className="flex justify-end gap-3 pt-4 border-t">
                 <button
-                  onClick={() => setEditingFAQ(null)}
-                  className="px-6 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition-colors font-medium"
+                  onClick={handleCloseEditModal}
+                  disabled={loading}
+                  className="px-6 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition-colors font-medium disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleUpdateFAQ}
-                  disabled={loading}
-                  className="flex items-center gap-2 px-6 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                  disabled={loading || Object.keys(validationErrors).length > 0}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
                 >
                   <CheckCircle size={18} />
                   {loading ? 'Updating...' : 'Update FAQ'}
