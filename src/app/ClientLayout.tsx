@@ -35,7 +35,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       <Footer />
 
       {!loading &&
-        ["admin", "parent", "child", "educator", "student"].includes(
+        ["admin", "parent", "child", "educator", "student", "user"].includes(
           role?.toLowerCase() ?? ""
         ) && <DialogflowMessenger />}
     </>

@@ -461,7 +461,7 @@ export default function EditProfilePage() {
     //{ id: "preferences", label: "Preferences", icon: Settings },
   ];
 
-  if (role && role.toLowerCase() !== "admin" && role.toLowerCase() !== "child") {
+if (role && (role.toLowerCase() === "parent" || role.toLowerCase() === "educator")) {
     tabs.push({ 
       id: "child", 
       label: role === "educator" ? "Students" : "Children", 

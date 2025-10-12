@@ -179,7 +179,7 @@ export default function Navbar() {
                               </Link>
                             )}
                             
-                            {(role === "admin" || role === "parent" || role === "child" || role === "educator" || role === "student") && (
+                            {(role === "admin" || role === "parent" || role === "child" || role === "educator" || role === "user"|| role === "student") && (
                               <>
                               <Link
                                 href="/editprofile"
@@ -298,7 +298,7 @@ export default function Navbar() {
                       </NavLink>
                     )}
 
-                    {(role === "admin" || role === "parent" || role === "child" || role === "educator" || role === "student") && (
+                    {(role === "admin" || role === "parent" || role === "child" || role === "educator" || role === "user" || role === "student") && (
                       <>
                       <NavLink href="/editprofile" onClick={closeMobileMenu}>
                         Edit Profile

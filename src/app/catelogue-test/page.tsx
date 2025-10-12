@@ -1404,7 +1404,7 @@ export default function DiscoverPage() {
         </div>
       )}
 
-      {["admin", "parent", "child", "educator", "student"].includes(role?.toLowerCase()) && (
+      {["admin", "parent", "child", "educator", "student", "user"].includes(role?.toLowerCase()) && (
         <>
           {/* <Chatbot /> */}
           <DialogflowMessenger />
