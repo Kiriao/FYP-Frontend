@@ -6,6 +6,7 @@ import {
   collection,
   doc,
   getDoc,
+  addDoc,
   getDocs,
   query,
   orderBy,
@@ -77,6 +78,7 @@ export default function AdminDashboard() {
     recentContacts: 0,
   });
   const [newFAQForm, setNewFAQForm] = useState({ question: "", answer: "", category: "general" });
+  const [showAddForm, setShowAddForm] = useState(false);
 
   // Calculate statistics
   const calculateStats = (
@@ -546,6 +548,21 @@ useEffect(() => {
     </div>
   );
 
+  const handleConvertToFAQ = async (faqData: { question: string; answer: string; category: string }) => {
+  try {
+    await addDoc(collection(db, "faqs"), {
+      ...faqData,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+    await fetchFAQs(); // Refresh FAQ list
+  } catch (error) {
+    console.error('Error adding FAQ:', error);
+    throw error; // Re-throw to let the component handle it
+  }
+};
+
+  
   const renderActiveTab = () => {
     switch (activeTab) {
       case "overview":
@@ -567,14 +584,27 @@ useEffect(() => {
       case "reportedContent":
         return <ReportedContentTab reportedContent={reportedContent} setReportedContent={setReportedContent} />;
       case "FAQs":
-        return <FAQsTab faqs={faqs} fetchFAQs={fetchFAQs} />;
+  return (
+    <FAQsTab 
+      faqs={faqs} 
+      fetchFAQs={fetchFAQs}
+      externalNewFAQForm={newFAQForm}
+      externalShowAddForm={showAddForm}
+      onNewFAQFormChange={setNewFAQForm}
+      onShowAddFormChange={setShowAddForm}
+    />
+  );
       case "userQuestions":
-        return <UserQuestionsTab 
-          userQuestions={userQuestions} 
-          fetchUserQuestions={fetchUserQuestions}
-          setNewFAQForm={setNewFAQForm}
-          setActiveTab={setActiveTab}
-        />;
+  return (
+    <UserQuestionsTab 
+      userQuestions={userQuestions} 
+      fetchUserQuestions={fetchUserQuestions}
+      setNewFAQForm={setNewFAQForm}
+      setActiveTab={setActiveTab}
+      setShowAddForm={setShowAddForm}
+      onConvertToFAQ={handleConvertToFAQ}  // ← ADD THIS LINE
+    />
+  );
       case "analytics":
         return (
           <section>

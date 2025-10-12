@@ -17,6 +17,11 @@ interface FAQItem {
 interface FAQsTabProps {
   faqs: FAQItem[];
   fetchFAQs: () => void;
+  // Add these new optional props for integration with UserQuestionsTab
+  externalNewFAQForm?: { question: string; answer: string; category: string };
+  externalShowAddForm?: boolean;
+  onNewFAQFormChange?: (form: { question: string; answer: string; category: string }) => void;
+  onShowAddFormChange?: (show: boolean) => void;
 }
 
 const CATEGORIES = [
@@ -28,23 +33,51 @@ const CATEGORIES = [
   { value: 'technical', label: 'Technical', color: 'bg-red-200 text-red-700' },
 ];
 
-export default function FAQsTab({ faqs, fetchFAQs }: FAQsTabProps) {
+export default function FAQsTab({ 
+  faqs, 
+  fetchFAQs,
+  externalNewFAQForm,
+  externalShowAddForm,
+  onNewFAQFormChange,
+  onShowAddFormChange
+}: FAQsTabProps) {
   const [editingFAQ, setEditingFAQ] = useState<FAQItem | null>(null);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState<string>('all');
-  const [showAddForm, setShowAddForm] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [validationErrors, setValidationErrors] = useState<{question?: string; answer?: string}>({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   
-  const [editFAQForm, setEditFAQForm] = useState({
+  // Internal state (fallback if no external state provided)
+  const [internalShowAddForm, setInternalShowAddForm] = useState(false);
+  const [internalNewFAQForm, setInternalNewFAQForm] = useState({
     question: "",
     answer: "",
     category: "general"
   });
+
+  // Use external state if provided, otherwise use internal state
+  const showAddForm = externalShowAddForm !== undefined ? externalShowAddForm : internalShowAddForm;
+  const newFAQForm = externalNewFAQForm || internalNewFAQForm;
   
-  const [newFAQForm, setNewFAQForm] = useState({
+  const setShowAddForm = (show: boolean) => {
+    if (onShowAddFormChange) {
+      onShowAddFormChange(show);
+    } else {
+      setInternalShowAddForm(show);
+    }
+  };
+
+  const setNewFAQForm = (form: { question: string; answer: string; category: string }) => {
+    if (onNewFAQFormChange) {
+      onNewFAQFormChange(form);
+    } else {
+      setInternalNewFAQForm(form);
+    }
+  };
+  
+  const [editFAQForm, setEditFAQForm] = useState({
     question: "",
     answer: "",
     category: "general"
@@ -524,6 +557,12 @@ export default function FAQsTab({ faqs, fetchFAQs }: FAQsTabProps) {
                   {loading ? 'Updating...' : 'Update FAQ'}
                 </button>
               </div>
+            </div>
+
+            <div className="mt-4 pt-4 border-t">
+              <p className="text-xs text-gray-500">
+                💡 Tip: Press <kbd className="px-2 py-1 bg-gray-100 rounded">Esc</kbd> to close
+              </p>
             </div>
           </div>
         </div>
