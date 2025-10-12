@@ -74,7 +74,7 @@ export default function EditProfilePage() {
 
   // Parent Profile
   const [fullName, setFullName] = useState("");
-  const [plan, setPlan] = useState("Free Plans");
+  const [plan, setPlan] = useState("Free Plan");
   const [avatar, setAvatar] = useState<string>("");
 
   // Parent Security
@@ -134,7 +134,7 @@ export default function EditProfilePage() {
           const data = userDoc.data();
           setRole(data.role || "");
           setFullName(data.fullName || "");
-          setPlan(data.plan || "Free Plans");
+          setPlan(data.plan || "Free Plan");
           setAvatar(data.avatar || "");
           setAgeRange(data.ageRange || "");
           setInterests(data.interests || "");
@@ -331,8 +331,8 @@ export default function EditProfilePage() {
     setCancelLoading(true);
     try {
       const oldPlan = plan;
-      await updateDoc(doc(db, "users", user.uid), { plan: "Free Plans" });
-      setPlan("Free Plans");
+      await updateDoc(doc(db, "users", user.uid), { plan: "Free Plan" });
+      setPlan("Free Plan");
 
       await fetch("/api/cancel-plan", {
         method: "POST",
@@ -340,7 +340,7 @@ export default function EditProfilePage() {
         body: JSON.stringify({
           email: user.email,
           oldPlan,
-          plan: "Free Plans",
+          plan: "Free Plan",
           method: "Subscription Cancellation",
         }),
       });
@@ -567,13 +567,13 @@ if (role && (role.toLowerCase() === "parent" || role.toLowerCase() === "educator
                           <p className="text-sm font-medium text-gray-600">Current Plan</p>
                           <p className="text-2xl font-bold text-pink-600">{plan}</p>
                         </div>
-                        {plan !== "Free Plans" && (
+                        {plan !== "Free Plan" && (
                           <span className="px-4 py-2 bg-pink-500 text-white text-sm font-semibold rounded-full">
                             Active
                           </span>
                         )}
                       </div>
-                      {plan !== "Free Plans" && (
+                      {plan !== "Free Plan" && (
                         <button
                           type="button"
                           onClick={handleCancelPlan}
