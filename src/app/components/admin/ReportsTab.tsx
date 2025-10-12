@@ -34,7 +34,7 @@ interface ReportsTabProps {
 
 export default function ReportsTab({ reports, setReports }: ReportsTabProps) {
   const [loading, setLoading] = useState<string | null>(null);
-  const [filter, setFilter] = useState<'all' | 'active' | 'deleted'>('all');
+  const [filter, setFilter] = useState<'all' | 'active'>('all');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error') => {
@@ -96,7 +96,6 @@ export default function ReportsTab({ reports, setReports }: ReportsTabProps) {
 
   const filteredReports = reports.filter(r => {
     if (filter === 'active') return r.reviewData;
-    if (filter === 'deleted') return !r.reviewData;
     return true;
   });
 
@@ -122,7 +121,7 @@ export default function ReportsTab({ reports, setReports }: ReportsTabProps) {
       </div>
 
       {/* Stats Bar */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 gap-4 mb-6">
         <div className="bg-gradient-to-br from-pink-50 to-pink-100 p-4 rounded-lg border border-pink-200">
           <div className="text-2xl font-bold text-pink-600">{reports.length}</div>
           <div className="text-sm text-gray-600">Total Reports</div>
@@ -133,17 +132,12 @@ export default function ReportsTab({ reports, setReports }: ReportsTabProps) {
           </div>
           <div className="text-sm text-gray-600">Active Reviews</div>
         </div>
-        <div className="bg-gradient-to-br from-gray-50 to-gray-100 p-4 rounded-lg border border-gray-200">
-          <div className="text-2xl font-bold text-gray-600">
-            {reports.filter(r => !r.reviewData).length}
-          </div>
-          <div className="text-sm text-gray-600">Already Deleted</div>
-        </div>
+
       </div>
 
       {/* Filter Tabs */}
       <div className="flex gap-2 mb-6 border-b border-gray-200">
-        {(['all', 'active', 'deleted'] as const).map(f => (
+        {(['all', 'active'] as const).map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}
