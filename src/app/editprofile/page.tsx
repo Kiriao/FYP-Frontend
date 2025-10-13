@@ -264,44 +264,74 @@ export default function EditProfilePage() {
     }
   };
 
-  // Update parent password
+// Update parent password
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user || !user.email) return;
 
-    if (!currentPassword || !newPassword) {
-      showToast("Please fill in all fields", "error");
+    // Validation checks
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      showToast("Please fill in all password fields", "error");
       return;
     }
 
     if (newPassword.length < 6) {
-      showToast("Password must be at least 6 characters", "error");
+      showToast("New password must be at least 6 characters", "error");
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      showToast("Passwords do not match", "error");
+      showToast("New passwords do not match", "error");
+      return;
+    }
+
+    if (currentPassword === newPassword) {
+      showToast("New password must be different from current password", "error");
       return;
     }
 
     setSaveLoading(true);
     try {
-      const credential = EmailAuthProvider.credential(user.email!, currentPassword);
+      // First, try to reauthenticate with current password
+      const credential = EmailAuthProvider.credential(user.email, currentPassword);
       await reauthenticateWithCredential(user, credential);
+      
+      // If reauthentication succeeds, update to new password
       await updatePassword(user, newPassword);
 
+      // Clear all fields on success
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
+      setShowConfirmPassword(false);
+      
       showToast("Password updated successfully!", "success");
     } catch (err: any) {
-      console.error(err);
-      showToast(err.message || "Failed to update password", "error");
+      console.error("Password update error:", err);
+      
+      // Handle specific Firebase auth errors with user-friendly messages
+      let errorMessage = "Failed to update password. Please try again.";
+      
+      if (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
+        errorMessage = "Current password is incorrect. Please try again.";
+      } else if (err.code === "auth/too-many-requests") {
+        errorMessage = "Too many failed attempts. Please wait a few minutes and try again.";
+      } else if (err.code === "auth/weak-password") {
+        errorMessage = "New password is too weak. Please use at least 6 characters.";
+      } else if (err.code === "auth/requires-recent-login") {
+        errorMessage = "For security, please log out and log back in before changing your password.";
+      } else if (err.code === "auth/network-request-failed") {
+        errorMessage = "Network error. Please check your connection and try again.";
+      }
+      
+      showToast(errorMessage, "error");
     } finally {
       setSaveLoading(false);
     }
   };
-
+  
   // Update parent preferences
   const handleSavePreferences = async (e: React.FormEvent) => {
     e.preventDefault();
