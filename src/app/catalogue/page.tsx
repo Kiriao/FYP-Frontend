@@ -1216,6 +1216,66 @@ export default function DiscoverPage() {
   // EFFECTS
   // ============================================
 
+<<<<<<< HEAD
+=======
+useEffect(() => {
+  (window as any).openAppModal = (d: any) => {
+    if (d?.type === "video") {
+      const vid =
+        d.id ||
+        (d.url && /[?&]v=([^&]+)/.exec(String(d.url))?.[1]) ||
+        "";
+
+      const embed =
+        d.link && String(d.link).includes("/embed/")
+          ? d.link
+          : vid
+          ? `https://www.youtube.com/embed/${vid}`
+          : d.link || "";
+
+      const watch =
+        d.url || (vid ? `https://www.youtube.com/watch?v=${vid}` : "");
+
+      const item: any = {
+        // fields your modal uses for videos
+        videoId: vid,
+        title: d.title || "",
+        thumbnail: d.image || "",
+        link: embed,      // used by the iframe inside the modal
+        url: watch,       // “Watch on YouTube” anchor
+        source: d.source || "chat",
+      };
+
+      setSelectedItem(item);
+      setShowPreview(true);   // show the player right away
+      return;
+    }
+
+    // Book fallback (unchanged)
+    const item: any = {
+      id: d.id || crypto.randomUUID(),
+      title: d.title || "",
+      thumbnail: d.image || "",
+      link: d.link || "",
+      url: d.url || d.link || "",
+      authors: d.authors
+        ? String(d.authors).split(",").map((s: string) => s.trim()).filter(Boolean)
+        : [],
+      snippet: d.snippet || "",
+      description: d.snippet || "",
+      source: d.source || "chat",
+      category: d.category || "",
+      age: d.age || "",
+    };
+    setSelectedItem(item);
+    setShowPreview(true);
+  };
+
+  return () => { delete (window as any).openAppModal; };
+}, []);
+
+
+>>>>>>> main
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);

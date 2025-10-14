@@ -43,6 +43,7 @@
 //   }
 // }
 
+<<<<<<< HEAD
 {
   "compilerOptions": {
     "target": "ES2020",
@@ -53,7 +54,39 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true
+=======
+// {
+//   "compilerOptions": {
+//     "target": "ES2020",
+//     "module": "commonjs",
+//     "lib": ["ES2020"],
+//     "outDir": "lib",
+//     "rootDir": "src",
+//     "strict": true,
+//     "esModuleInterop": true,
+//     "skipLibCheck": true
+//   },
+//   "include": ["src/**/*.ts"]
+// }
+
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ES2020",
+    "moduleResolution": "Node",
+    "lib": ["ES2021"],
+    "rootDir": "src",
+    "outDir": "lib",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true
+>>>>>>> main
   },
   "include": ["src/**/*.ts"]
 }
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> main

@@ -264,6 +264,7 @@ export default function EditProfilePage() {
     }
   };
 
+<<<<<<< HEAD
 // Update parent password
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -272,26 +273,44 @@ export default function EditProfilePage() {
     // Validation checks
     if (!currentPassword || !newPassword || !confirmPassword) {
       showToast("Please fill in all password fields", "error");
+=======
+  // Update parent password
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
+    if (!currentPassword || !newPassword) {
+      showToast("Please fill in all fields", "error");
+>>>>>>> main
       return;
     }
 
     if (newPassword.length < 6) {
+<<<<<<< HEAD
       showToast("New password must be at least 6 characters", "error");
+=======
+      showToast("Password must be at least 6 characters", "error");
+>>>>>>> main
       return;
     }
 
     if (newPassword !== confirmPassword) {
+<<<<<<< HEAD
       showToast("New passwords do not match", "error");
       return;
     }
 
     if (currentPassword === newPassword) {
       showToast("New password must be different from current password", "error");
+=======
+      showToast("Passwords do not match", "error");
+>>>>>>> main
       return;
     }
 
     setSaveLoading(true);
     try {
+<<<<<<< HEAD
       // First, try to reauthenticate with current password
       const credential = EmailAuthProvider.credential(user.email, currentPassword);
       await reauthenticateWithCredential(user, credential);
@@ -327,11 +346,28 @@ export default function EditProfilePage() {
       }
       
       showToast(errorMessage, "error");
+=======
+      const credential = EmailAuthProvider.credential(user.email!, currentPassword);
+      await reauthenticateWithCredential(user, credential);
+      await updatePassword(user, newPassword);
+
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      showToast("Password updated successfully!", "success");
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.message || "Failed to update password", "error");
+>>>>>>> main
     } finally {
       setSaveLoading(false);
     }
   };
+<<<<<<< HEAD
   
+=======
+
+>>>>>>> main
   // Update parent preferences
   const handleSavePreferences = async (e: React.FormEvent) => {
     e.preventDefault();
