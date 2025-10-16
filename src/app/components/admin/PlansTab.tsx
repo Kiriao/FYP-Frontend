@@ -342,7 +342,7 @@ export default function PlansTab({ plans, fetchPlans }: PlansTabProps) {
           <p className="text-2xl font-bold text-yellow-600">{stats.popularPlans}</p>
         </div>
         <div className="bg-white rounded-lg shadow p-4 border-l-4 border-purple-500">
-          <p className="text-sm text-gray-600">Free Plans</p>
+          <p className="text-sm text-gray-600">Free Plan</p>
           <p className="text-2xl font-bold text-purple-600">{stats.freePlans}</p>
         </div>
       </div>

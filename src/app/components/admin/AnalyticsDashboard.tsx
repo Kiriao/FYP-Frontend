@@ -43,7 +43,7 @@ export default function AnalyticsDashboard({
     const planCounts: { [key: string]: number } = {};
     
     users.forEach(user => {
-      if (user.plan && user.plan !== 'Free Plans') {
+      if (user.plan && user.plan !== 'Free Plan') {
         const plan = plans.find(p => p.name === user.plan);
         if (plan) {
           totalRevenue += plan.price;
@@ -51,7 +51,7 @@ export default function AnalyticsDashboard({
       }
       
       // Count plan distribution
-      const planName = user.plan || 'Free Plans';
+      const planName = user.plan || 'Free Plan';
       planCounts[planName] = (planCounts[planName] || 0) + 1;
     });
 
@@ -148,7 +148,7 @@ export default function AnalyticsDashboard({
 
     const kpiData = [
       ["Metric", "Value", "Details"],
-      ["Monthly Revenue", `${analytics.totalRevenue}`, `From ${users.filter(u => u.plan !== 'Free Plans').length} paid users`],
+      ["Monthly Revenue", `${analytics.totalRevenue}`, `From ${users.filter(u => u.plan !== 'Free Plan').length} paid users`],
       ["Active Users", analytics.activeUsers.toString(), `of ${users.length} total users`],
       ["Inactive Rate", `${analytics.avgChurnRate}%`, `${users.filter(u => u.role === 'inactive').length} inactive users`],
       ["Total Reviews", reviews.length.toString(), `${reviews.filter(r => r.showOnHome).length} shown on home`]
@@ -298,7 +298,7 @@ export default function AnalyticsDashboard({
             <div>
               <p className="text-sm text-gray-600">Monthly Revenue</p>
               <p className="text-2xl font-bold text-gray-900">${analytics.totalRevenue}</p>
-              <p className="text-sm text-green-600 mt-1">From {users.filter(u => u.plan !== 'Free Plans').length} paid users</p>
+              <p className="text-sm text-green-600 mt-1">From {users.filter(u => u.plan !== 'Free Plan').length} paid users</p>
             </div>
             <DollarSign className="h-8 w-8 text-green-600" />
           </div>
@@ -415,7 +415,7 @@ export default function AnalyticsDashboard({
           <div className="mt-4 pt-4 border-t">
             <div className="flex justify-between text-sm text-gray-600">
               <span>Revenue Generating Users</span>
-              <span className="font-semibold">{users.filter(u => u.plan !== 'Free Plans').length} users</span>
+              <span className="font-semibold">{users.filter(u => u.plan !== 'Free Plan').length} users</span>
             </div>
           </div>
         </div>
@@ -481,7 +481,7 @@ export default function AnalyticsDashboard({
           <div className="p-4 bg-blue-50 rounded">
             <h4 className="font-semibold text-blue-800">Revenue Health</h4>
             <p className="text-blue-600">
-              ${analytics.totalRevenue}/month from {users.filter(u => u.plan !== 'Free Plans').length} paying users
+              ${analytics.totalRevenue}/month from {users.filter(u => u.plan !== 'Free Plan').length} paying users
             </p>
           </div>
           <div className="p-4 bg-green-50 rounded">

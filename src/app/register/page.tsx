@@ -80,7 +80,7 @@ export default function RegisterPage() {
         role,
         createdAt: new Date(),
         emailVerified: user.emailVerified,
-        plan: "Free Plans",
+        plan: "Free Plan",
       });
 
       // Success - show modal or redirect

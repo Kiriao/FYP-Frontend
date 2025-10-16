@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     await db.collection("users").doc(userRecord.uid).set({
       fullName: childName,
       email: childEmail,
-      plan: "Free Plans",
+      plan: "Free Plan",
       role: "child",
       parentId,
       restrictions: [],
