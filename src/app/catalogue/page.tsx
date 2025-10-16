@@ -1215,10 +1215,7 @@ export default function DiscoverPage() {
   // ============================================
   // EFFECTS
   // ============================================
-
-<<<<<<< HEAD
-=======
-useEffect(() => {
+  useEffect(() => {
   (window as any).openAppModal = (d: any) => {
     if (d?.type === "video") {
       const vid =
@@ -1274,8 +1271,6 @@ useEffect(() => {
   return () => { delete (window as any).openAppModal; };
 }, []);
 
-
->>>>>>> main
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);

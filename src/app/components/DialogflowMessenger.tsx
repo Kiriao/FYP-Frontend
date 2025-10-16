@@ -4,10 +4,6 @@ import { useEffect } from "react";
 
 export default function DialogflowMessenger() {
   useEffect(() => {
-<<<<<<< HEAD
-    // Prevent duplicate <df-messenger> creation
-    if (document.querySelector("df-messenger")) return;
-=======
     // avoid double wiring
     // @ts-ignore
     if ((window as any).__kidflix_click_wired) return;
@@ -73,32 +69,18 @@ export default function DialogflowMessenger() {
       window.removeEventListener("df-info-card-clicked" as any, onInfo as any);
       window.removeEventListener("df-url-clicked" as any, onUrl as any);
     };
->>>>>>> main
   }, []);
 
   return (
     <>
-<<<<<<< HEAD
-      {/* Load the CX Messenger script only once */}
-=======
->>>>>>> main
       <Script
         src="https://www.gstatic.com/dialogflow-console/fast/df-messenger/prod/v1/df-messenger.js"
         strategy="afterInteractive"
       />
-<<<<<<< HEAD
-      {/* Optionally load CSS theme */}
-=======
->>>>>>> main
       <link
         rel="stylesheet"
         href="https://www.gstatic.com/dialogflow-console/fast/df-messenger/prod/v1/themes/df-messenger-default.css"
       />
-<<<<<<< HEAD
-
-      {/* Messenger element */}
-=======
->>>>>>> main
       <df-messenger
         location="asia-southeast1"
         project-id="kidflix-4cda0"
@@ -124,8 +106,4 @@ export default function DialogflowMessenger() {
       `}</style>
     </>
   );
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> main

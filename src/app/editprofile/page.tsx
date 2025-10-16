@@ -74,7 +74,7 @@ export default function EditProfilePage() {
 
   // Parent Profile
   const [fullName, setFullName] = useState("");
-  const [plan, setPlan] = useState("Free Plan");
+  const [plan, setPlan] = useState("Free Plans");
   const [avatar, setAvatar] = useState<string>("");
 
   // Parent Security
@@ -134,7 +134,7 @@ export default function EditProfilePage() {
           const data = userDoc.data();
           setRole(data.role || "");
           setFullName(data.fullName || "");
-          setPlan(data.plan || "Free Plan");
+          setPlan(data.plan || "Free Plans");
           setAvatar(data.avatar || "");
           setAgeRange(data.ageRange || "");
           setInterests(data.interests || "");
@@ -264,16 +264,6 @@ export default function EditProfilePage() {
     }
   };
 
-<<<<<<< HEAD
-// Update parent password
-  const handleUpdatePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !user.email) return;
-
-    // Validation checks
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      showToast("Please fill in all password fields", "error");
-=======
   // Update parent password
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -281,72 +271,21 @@ export default function EditProfilePage() {
 
     if (!currentPassword || !newPassword) {
       showToast("Please fill in all fields", "error");
->>>>>>> main
       return;
     }
 
     if (newPassword.length < 6) {
-<<<<<<< HEAD
-      showToast("New password must be at least 6 characters", "error");
-=======
       showToast("Password must be at least 6 characters", "error");
->>>>>>> main
       return;
     }
 
     if (newPassword !== confirmPassword) {
-<<<<<<< HEAD
-      showToast("New passwords do not match", "error");
-      return;
-    }
-
-    if (currentPassword === newPassword) {
-      showToast("New password must be different from current password", "error");
-=======
       showToast("Passwords do not match", "error");
->>>>>>> main
       return;
     }
 
     setSaveLoading(true);
     try {
-<<<<<<< HEAD
-      // First, try to reauthenticate with current password
-      const credential = EmailAuthProvider.credential(user.email, currentPassword);
-      await reauthenticateWithCredential(user, credential);
-      
-      // If reauthentication succeeds, update to new password
-      await updatePassword(user, newPassword);
-
-      // Clear all fields on success
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      setShowCurrentPassword(false);
-      setShowNewPassword(false);
-      setShowConfirmPassword(false);
-      
-      showToast("Password updated successfully!", "success");
-    } catch (err: any) {
-      console.error("Password update error:", err);
-      
-      // Handle specific Firebase auth errors with user-friendly messages
-      let errorMessage = "Failed to update password. Please try again.";
-      
-      if (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
-        errorMessage = "Current password is incorrect. Please try again.";
-      } else if (err.code === "auth/too-many-requests") {
-        errorMessage = "Too many failed attempts. Please wait a few minutes and try again.";
-      } else if (err.code === "auth/weak-password") {
-        errorMessage = "New password is too weak. Please use at least 6 characters.";
-      } else if (err.code === "auth/requires-recent-login") {
-        errorMessage = "For security, please log out and log back in before changing your password.";
-      } else if (err.code === "auth/network-request-failed") {
-        errorMessage = "Network error. Please check your connection and try again.";
-      }
-      
-      showToast(errorMessage, "error");
-=======
       const credential = EmailAuthProvider.credential(user.email!, currentPassword);
       await reauthenticateWithCredential(user, credential);
       await updatePassword(user, newPassword);
@@ -358,16 +297,11 @@ export default function EditProfilePage() {
     } catch (err: any) {
       console.error(err);
       showToast(err.message || "Failed to update password", "error");
->>>>>>> main
     } finally {
       setSaveLoading(false);
     }
   };
-<<<<<<< HEAD
-  
-=======
 
->>>>>>> main
   // Update parent preferences
   const handleSavePreferences = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -397,8 +331,8 @@ export default function EditProfilePage() {
     setCancelLoading(true);
     try {
       const oldPlan = plan;
-      await updateDoc(doc(db, "users", user.uid), { plan: "Free Plan" });
-      setPlan("Free Plan");
+      await updateDoc(doc(db, "users", user.uid), { plan: "Free Plans" });
+      setPlan("Free Plans");
 
       await fetch("/api/cancel-plan", {
         method: "POST",
@@ -406,7 +340,7 @@ export default function EditProfilePage() {
         body: JSON.stringify({
           email: user.email,
           oldPlan,
-          plan: "Free Plan",
+          plan: "Free Plans",
           method: "Subscription Cancellation",
         }),
       });
@@ -633,13 +567,13 @@ if (role && (role.toLowerCase() === "parent" || role.toLowerCase() === "educator
                           <p className="text-sm font-medium text-gray-600">Current Plan</p>
                           <p className="text-2xl font-bold text-pink-600">{plan}</p>
                         </div>
-                        {plan !== "Free Plan" && (
+                        {plan !== "Free Plans" && (
                           <span className="px-4 py-2 bg-pink-500 text-white text-sm font-semibold rounded-full">
                             Active
                           </span>
                         )}
                       </div>
-                      {plan !== "Free Plan" && (
+                      {plan !== "Free Plans" && (
                         <button
                           type="button"
                           onClick={handleCancelPlan}

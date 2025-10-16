@@ -3,10 +3,7 @@ import * as logger from "firebase-functions/logger";
 import { fetch } from "undici";
 
 const API_BASE = process.env.APP_API_BASE || "";
-<<<<<<< HEAD
-=======
 const APP_ORIGIN = (process.env.APP_PUBLIC_ORIGIN || "https://kidflix-4cda0.web.app").replace(/\/+$/, "");
->>>>>>> main
 
 /* ------------ tiny helpers ------------ */
 async function getJSON<T = any>(url: string): Promise<T> {
@@ -18,8 +15,6 @@ const pickItems = (d: any): any[] =>
   Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : Array.isArray(d?.results) ? d.results : [];
 const pickTitle = (x: any) => x?.title || x?.name || x?.volumeInfo?.title || x?.snippet?.title;
 
-<<<<<<< HEAD
-=======
 /** Force HTTPS (avoid mixed-content blocking) */
 function httpsify(u?: string | null): string | null {
   if (!u) return null;
@@ -80,7 +75,6 @@ function makeInfoCard(title: string, subtitle: string | null, img: string | null
   return card;
 }
 
->>>>>>> main
 type Canon =
   | "all" | "fiction" | "nonfiction" | "education" | "children_literature"
   | "picture_board_early" | "middle_grade" | "poetry_humor" | "biography" | "other_kids" | "young_adult"
@@ -152,20 +146,12 @@ function videoQueryFor(canon: Canon): string {
   }
 }
 
-<<<<<<< HEAD
-function replyText(res: any, text: string, extras: Record<string, any> = {}, payload?: any) {
-  try { res.setHeader?.("Content-Type", "application/json"); } catch {}
-  const messages: any[] = [{ text: { text: [text] } }];
-  if (payload) messages.push({ payload });
-  res.status(200).json({ fulfillment_response: { messages }, session_info: { parameters: { ...extras } } });
-=======
 /* unified reply that also supports Messenger richContent */
 function reply(res: any, text: string, extras: Record<string, any> = {}, payload?: any) {
   try { res.setHeader?.("Content-Type", "application/json"); } catch {}
   const messages: any[] = [{ text: { text: [text] } }];
   if (payload) messages.push({ payload });
   res.status(200).json({ fulfillment_response: { messages }, sessionInfo: { parameters: { ...extras } } });
->>>>>>> main
 }
 
 export const cxWebhook = onRequest(
@@ -175,10 +161,6 @@ export const cxWebhook = onRequest(
     const tag = rawTag.toLowerCase();
     const params = (req.body?.sessionInfo?.parameters as Record<string, any>) || {};
 
-<<<<<<< HEAD
-    // keep books/videos separate
-=======
->>>>>>> main
     const rawBook  = clean(params.genre as string | undefined);
     const rawVideo = clean(params.genre_video as string | undefined);
     const bookCanon  = normGenre(rawBook);
@@ -195,11 +177,7 @@ export const cxWebhook = onRequest(
 
       if (isBooks) {
         if (!bookCanon) {
-<<<<<<< HEAD
-          replyText(res, "Which book category are you after? (Fiction, Non Fiction, Education, Children’s Literature, Picture/Board/Early, Middle Grade, Poetry & Humor, Biography, Young Adult)");
-=======
           reply(res, "Which book category are you after? (Fiction, Non Fiction, Education, Children’s Literature, Picture/Board/Early, Middle Grade, Poetry & Humor, Biography, Young Adult)");
->>>>>>> main
           return;
         }
         const { term: bookTerm, juvenile } = bookQueryFor(bookCanon);
@@ -219,13 +197,9 @@ export const cxWebhook = onRequest(
             const data: any = await getJSON(u.toString());
             items = pickItems(data);
             usedUrl = u.toString(); source = "app";
-<<<<<<< HEAD
-          } catch (e) { logger.warn("App /api/books failed, falling back to Google Books", { e: String(e) }); }
-=======
           } catch (e) {
             logger.warn("App /api/books failed, falling back to Google Books", { e: String(e) });
           }
->>>>>>> main
         }
         if (items.length === 0) {
           const u = new URL("https://www.googleapis.com/books/v1/volumes");
@@ -240,21 +214,12 @@ export const cxWebhook = onRequest(
         }
 
         const display = rawBook || bookCanon;
-<<<<<<< HEAD
-        const top = items.slice(0, 3).map((it: any, i: number) => `${i + 1}. ${pickTitle(it) ?? "Untitled"}`).filter(Boolean);
-=======
         const topItems = items.slice(0, 5);
         const top = topItems.map((it: any, i: number) => `${i + 1}. ${pickTitle(it) ?? "Untitled"}`).filter(Boolean);
->>>>>>> main
         const text = top.length
           ? `Here are some book picks${display ? ` on "${display}"` : ""}${age ? ` (age ${age})` : ""}:\n${top.join("\n")}`
           : `I couldn't find books${display ? ` on "${display}"` : ""}${age ? ` for age ${age}` : ""}. Try another category?`;
 
-<<<<<<< HEAD
-        logger.info("BOOKS", { canon: bookCanon, q: bookTerm, count: items.length, usedUrl, source });
-
-        replyText(res, text, {
-=======
         const cards = topItems.map((it: any) => {
           const title = pickTitle(it) ?? "Untitled";
           const authorList = (it?.authors && Array.isArray(it.authors) ? it.authors
@@ -296,28 +261,19 @@ export const cxWebhook = onRequest(
         logger.info("BOOKS", { canon: bookCanon, q: bookTerm, count: items.length, usedUrl, source });
 
         reply(res, text, {
->>>>>>> main
           books_done: true,
           genre: rawBook ?? "",
           category: bookCanon,
           lastQueryAt: new Date().toISOString(),
           lastQueryUrl: usedUrl,
           source
-<<<<<<< HEAD
-        });
-=======
         }, payload);
->>>>>>> main
         return;
       }
 
       if (isVideos) {
         if (!videoCanon) {
-<<<<<<< HEAD
-          replyText(res, "What kind of videos are you looking for? (Stories, Songs & Rhymes, Learning, Science, Math, Animals, Art & Crafts)");
-=======
           reply(res, "What kind of videos are you looking for? (Stories, Songs & Rhymes, Learning, Science, Math, Animals, Art & Crafts)");
->>>>>>> main
           return;
         }
         const vq = videoQueryFor(videoCanon);
@@ -335,13 +291,9 @@ export const cxWebhook = onRequest(
             const data: any = await getJSON(u.toString());
             items = pickItems(data);
             usedUrl = u.toString(); source = "app";
-<<<<<<< HEAD
-          } catch (e) { logger.warn("App /api/videos failed, falling back to YouTube", { e: String(e) }); }
-=======
           } catch (e) {
             logger.warn("App /api/videos failed, falling back to YouTube", { e: String(e) });
           }
->>>>>>> main
         }
         if (items.length === 0) {
           const u = new URL("https://www.googleapis.com/youtube/v3/search");
@@ -358,21 +310,12 @@ export const cxWebhook = onRequest(
         }
 
         const display = rawVideo || videoCanon;
-<<<<<<< HEAD
-        const top = items.slice(0, 3).map((it: any, i: number) => `${i + 1}. ${pickTitle(it) ?? "Untitled"}`).filter(Boolean);
-=======
         const topItems = items.slice(0, 5);
         const top = topItems.map((it: any, i: number) => `${i + 1}. ${pickTitle(it) ?? "Untitled"}`).filter(Boolean);
->>>>>>> main
         const text = top.length
           ? `Here are some videos${display ? ` about "${display}"` : ""}:\n${top.join("\n")}`
           : `I couldn't find videos${display ? ` about "${display}"` : ""}. Try another topic?`;
 
-<<<<<<< HEAD
-        logger.info("VIDEOS", { canon: videoCanon, q: vq, count: items.length, usedUrl, source });
-
-        replyText(res, text, {
-=======
         // 🔻 Only this block changed (embed + watch URL in the deep-link)
         const cards = topItems.map((it: any) => {
           const title = pickTitle(it) ?? "Untitled";
@@ -409,7 +352,6 @@ export const cxWebhook = onRequest(
         logger.info("VIDEOS", { canon: videoCanon, q: vq, count: items.length, usedUrl, source });
 
         reply(res, text, {
->>>>>>> main
           videos_done: true,
           genre: "",
           genre_video: rawVideo ?? "",
@@ -417,16 +359,6 @@ export const cxWebhook = onRequest(
           lastQueryAt: new Date().toISOString(),
           lastQueryUrl: usedUrl,
           source
-<<<<<<< HEAD
-        });
-        return;
-      }
-
-      replyText(res, `No fulfillment defined for tag "${rawTag || "(empty)"}".`);
-    } catch (err: any) {
-      logger.error("Webhook error", { err: String(err?.message || err) });
-      replyText(res, "Something went wrong fetching results. Please try again.");
-=======
         }, payload);
         return;
       }
@@ -435,7 +367,6 @@ export const cxWebhook = onRequest(
     } catch (err: any) {
       logger.error("Webhook error", { err: String(err?.message || err) });
       reply(res, "Something went wrong fetching results. Please try again.");
->>>>>>> main
     }
   }
 );
