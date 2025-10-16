@@ -2,15 +2,8 @@
   "functions": {
     "source": "functions",
     "runtime": "nodejs20",
-<<<<<<< HEAD
-    "predeploy": ["npm --prefix functions run build"],
+    "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"],
     "ignore": ["**/node_modules/**", "**/lib/**"]
-  }
-=======
-    "predeploy": [
-      "npm --prefix \"$RESOURCE_DIR\" run build"
-    ],
-    "ignore": ["**/node_modules/**"]
   },
   "hosting": [
     {
@@ -18,5 +11,4 @@
       "source": "."
     }
   ]
->>>>>>> main
 }
