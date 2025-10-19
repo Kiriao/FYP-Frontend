@@ -34,10 +34,10 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       </ResponsiveWrapper>
       <Footer />
 
-      {!loading &&
+{/*       {!loading &&
         ["admin", "parent", "child", "educator", "student", "user"].includes(
           role?.toLowerCase() ?? ""
-        ) && <DialogflowMessenger />}
+        ) && <DialogflowMessenger />} */}
     </>
   );
 }
