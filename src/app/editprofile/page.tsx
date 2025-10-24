@@ -400,49 +400,69 @@ export default function EditProfilePage() {
   };
 
   // Update child password
-  const handleUpdateChildPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedChild || !childNewPassword) return;
+  // Update child/student password
+const handleUpdateChildPassword = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!selectedChild || !childNewPassword || !user) return;
 
-    if (childNewPassword.length < 6) {
-      showToast("Password must be at least 6 characters", "error");
-      return;
-    }
+  if (childNewPassword.length < 6) {
+    showToast("Password must be at least 6 characters", "error");
+    return;
+  }
 
-    if (childNewPassword !== childConfirmPassword) {
-      showToast("Passwords do not match", "error");
-      return;
-    }
+  if (childNewPassword !== childConfirmPassword) {
+    showToast("Passwords do not match", "error");
+    return;
+  }
 
-    setSaveLoading(true);
-    try {
-      const res = await fetch("/api/update-child-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          parentId: user?.uid,
+  setSaveLoading(true);
+  try {
+    // Determine which API endpoint and parameters to use based on role
+    const apiEndpoint = role === "educator" 
+      ? "/api/update-student-password" 
+      : "/api/update-child-password";
+    
+    const requestBody = role === "educator"
+      ? {
+          educatorId: user.uid,
+          studentId: selectedChild.id,
+          newPassword: childNewPassword,
+        }
+      : {
+          parentId: user.uid,
           childId: selectedChild.id,
           newPassword: childNewPassword,
-        }),
-      });
+        };
 
-      const data = await res.json();
-      if (data.success) {
-        showToast(`${role === "educator" ? "Student" : "Child"} password updated!`, "success");
-        setChildNewPassword("");
-        setChildConfirmPassword("");
-        setShowChildNewPassword(false);
-        setShowChildConfirmPassword(false);
-      } else {
-        showToast("Error: " + data.error, "error");
-      }
-    } catch (err: any) {
-      console.error(err);
-      showToast(err.message, "error");
-    } finally {
-      setSaveLoading(false);
+    console.log("Sending request to:", apiEndpoint);
+    console.log("Request body:", requestBody);
+
+    const res = await fetch(apiEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody),
+    });
+
+    const data = await res.json();
+    
+    console.log("Response:", data);
+
+    if (data.success) {
+      showToast(`${role === "educator" ? "Student" : "Child"} password updated!`, "success");
+      setChildNewPassword("");
+      setChildConfirmPassword("");
+      setShowChildNewPassword(false);
+      setShowChildConfirmPassword(false);
+    } else {
+      showToast("Error: " + data.error, "error");
     }
-  };
+  } catch (err: any) {
+    console.error("Password update error:", err);
+    showToast(err.message, "error");
+  } finally {
+    setSaveLoading(false);
+  }
+};
 
   if (loading) {
     return (
