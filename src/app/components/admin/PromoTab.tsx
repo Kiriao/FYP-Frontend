@@ -575,7 +575,7 @@ export default function PromoCodesTab({ promoCodes, onRefresh }: PromoCodesTabPr
                           <div className="flex items-center gap-1 text-sm">
                             <Clock className="w-4 h-4 text-gray-400" />
                             <span className="text-gray-600">
-                              {getDateFromFirestore(promo.expiresAt)?.toLocaleDateString() || 'Invalid date'}
+                              {getDateFromFirestore(promo.expiresAt)?.toLocaleDateString('en-GB') || 'Invalid date'}
                             </span>
                           </div>
                         ) : (
