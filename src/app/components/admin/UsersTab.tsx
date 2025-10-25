@@ -316,7 +316,18 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
 
           // Generate PDF
           const pdf = await generateInvoiceForUser(user, subscriptions);
-          pdf.save(`invoice_${user.fullName.replace(/\s+/g, '_')}_${Date.now()}.pdf`);
+          
+          // Format filename with date and time: DD-MM-YYYY_HH-MM-SS
+          const now = new Date();
+          const day = String(now.getDate()).padStart(2, '0');
+          const month = String(now.getMonth() + 1).padStart(2, '0');
+          const year = now.getFullYear();
+          const hours = String(now.getHours()).padStart(2, '0');
+          const minutes = String(now.getMinutes()).padStart(2, '0');
+          const seconds = String(now.getSeconds()).padStart(2, '0');
+          const dateTimeStr = `${day}-${month}-${year}_${hours}-${minutes}-${seconds}`;
+          
+          pdf.save(`invoice_${user.fullName.replace(/\s+/g, '_')}_${dateTimeStr}.pdf`);
 
           successCount++;
           // Add small delay between downloads
