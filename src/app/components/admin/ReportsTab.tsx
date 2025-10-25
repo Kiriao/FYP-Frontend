@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { deleteDoc, doc } from 'firebase/firestore';
+import { useState, useEffect } from 'react';
+import { deleteDoc, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { AlertCircle, Trash2, Shield, Clock, User, FileText, CheckCircle } from 'lucide-react';
 
@@ -36,6 +36,37 @@ export default function ReportsTab({ reports, setReports }: ReportsTabProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'active'>('all');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [userNames, setUserNames] = useState<Record<string, string>>({});
+
+  // Fetch user names for all reporters
+  useEffect(() => {
+    const fetchUserNames = async () => {
+      const uniqueUserIds = Array.from(new Set(reports.map(r => r.reportedBy)));
+      const names: Record<string, string> = {};
+      
+      await Promise.all(
+        uniqueUserIds.map(async (userId) => {
+          try {
+            const userDoc = await getDoc(doc(db, 'users', userId));
+            if (userDoc.exists()) {
+              names[userId] = userDoc.data().name || userDoc.data().email || userId;
+            } else {
+              names[userId] = userId; // Fallback to ID if user not found
+            }
+          } catch (error) {
+            console.error('Error fetching user:', error);
+            names[userId] = userId; // Fallback to ID on error
+          }
+        })
+      );
+      
+      setUserNames(names);
+    };
+
+    if (reports.length > 0) {
+      fetchUserNames();
+    }
+  }, [reports]);
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
@@ -82,13 +113,12 @@ export default function ReportsTab({ reports, setReports }: ReportsTabProps) {
   const formatDate = (timestamp: any): string => {
     try {
       const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
-      return date.toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      return `${day}/${month}/${year} ${hours}:${minutes}`;
     } catch {
       return 'Invalid date';
     }
@@ -176,7 +206,7 @@ export default function ReportsTab({ reports, setReports }: ReportsTabProps) {
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold text-gray-700">Reported by:</span>
-                        <span className="text-gray-900">{r.reportedBy}</span>
+                        <span className="text-gray-900">{userNames[r.reportedBy] || r.reportedBy}</span>
                         {!r.reviewData && (
                           <span className="px-2 py-1 bg-gray-200 text-gray-700 text-xs rounded-full font-medium">
                             Review Deleted

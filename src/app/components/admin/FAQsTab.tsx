@@ -102,7 +102,7 @@ export default function FAQsTab({
     
     if (!editFAQForm.answer.trim()) {
       errors.answer = 'Answer is required';
-    } else if (editFAQForm.answer.trim().length < 20) {
+    } else if (editFAQForm.answer.trim().length < 1) {
       errors.answer = 'Answer must be at least 20 characters';
     } else if (editFAQForm.answer.trim().length > 2000) {
       errors.answer = 'Answer must be less than 2000 characters';
@@ -230,7 +230,10 @@ export default function FAQsTab({
   const formatDate = (timestamp: any): string => {
     try {
       const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
     } catch {
       return 'N/A';
     }

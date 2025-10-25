@@ -15,7 +15,7 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { onAuthStateChanged, User } from "firebase/auth";
-import AnalyticsDashboard from "../AnalyticsDashboard/AnalyticsDashboard";
+import AnalyticsDashboard from "../components/admin/AnalyticsDashboard";
 
 // Import all the tab components
 import AdminSidebar from "../components/admin/AdminSidebar";

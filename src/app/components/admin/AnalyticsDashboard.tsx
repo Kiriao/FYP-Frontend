@@ -297,7 +297,7 @@ export default function AnalyticsDashboard({
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Monthly Revenue</p>
-              <p className="text-2xl font-bold text-gray-900">${analytics.totalRevenue}</p>
+              <p className="text-2xl font-bold text-gray-900">${analytics.totalRevenue.toFixed(2)}</p>
               <p className="text-sm text-green-600 mt-1">From {users.filter(u => u.plan !== 'Free Plan').length} paid users</p>
             </div>
             <DollarSign className="h-8 w-8 text-green-600" />

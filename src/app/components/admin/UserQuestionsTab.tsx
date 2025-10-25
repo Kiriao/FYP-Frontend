@@ -130,16 +130,16 @@ export default function UserQuestionsTab({
     
     if (!convertForm.question.trim()) {
       errors.question = 'Question is required';
-    } else if (convertForm.question.trim().length < 10) {
-      errors.question = 'Question must be at least 10 characters';
+    } else if (convertForm.question.trim().length < 1) {
+      errors.question = 'Question must be at least 1 characters';
     } else if (convertForm.question.trim().length > 200) {
       errors.question = 'Question must be less than 200 characters';
     }
     
     if (!convertForm.answer.trim()) {
       errors.answer = 'Answer is required';
-    } else if (convertForm.answer.trim().length < 20) {
-      errors.answer = 'Answer must be at least 20 characters';
+    } else if (convertForm.answer.trim().length < 1) {
+      errors.answer = 'Answer must be at least 1 characters';
     } else if (convertForm.answer.trim().length > 2000) {
       errors.answer = 'Answer must be less than 2000 characters';
     }
@@ -202,14 +202,17 @@ export default function UserQuestionsTab({
 
   const formatDate = (timestamp: any) => {
     if (!timestamp) return 'Unknown';
-    const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
-    return new Intl.DateTimeFormat('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    }).format(date);
+    try {
+      const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      return `${day}/${month}/${year} ${hours}:${minutes}`;
+    } catch {
+      return 'Unknown';
+    }
   };
 
   return (
