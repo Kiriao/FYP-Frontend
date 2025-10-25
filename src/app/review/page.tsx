@@ -147,11 +147,11 @@ export default function ReviewPage() {
   const formatDate = (timestamp: any) => {
     if (!timestamp) return "Just now";
     try {
-      return timestamp.toDate().toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-      });
+      const date = timestamp.toDate();
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
     } catch {
       return "Recently";
     }

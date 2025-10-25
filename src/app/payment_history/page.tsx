@@ -22,8 +22,12 @@ function generateInvoice(subscription: any, user: any) {
   // Invoice Number and Date
   doc.setFontSize(10);
   doc.setTextColor(100, 100, 100);
-  doc.text(`Invoice #: INV-${subscription.createdAt?.toDate ? subscription.createdAt.toDate().getTime() : Date.now()}`, 14, 35);
-  doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, 42);
+  const invoiceDate = subscription.createdAt?.toDate ? subscription.createdAt.toDate() : new Date();
+  const invoiceNum = `${invoiceDate.getFullYear()}${String(invoiceDate.getMonth() + 1).padStart(2, '0')}${String(invoiceDate.getDate()).padStart(2, '0')}-${String(invoiceDate.getHours()).padStart(2, '0')}${String(invoiceDate.getMinutes()).padStart(2, '0')}`;
+  doc.text(`Invoice #: INV-${invoiceNum}`, 14, 35);
+  const today = new Date();
+  const todayFormatted = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+  doc.text(`Date: ${todayFormatted}`, 14, 42);
 
   // Customer Info
   doc.setFontSize(12);
@@ -54,13 +58,9 @@ function generateInvoice(subscription: any, user: any) {
   
   doc.setTextColor(60, 60, 60);
   doc.text("Date:", 14, 120);
-  doc.text(
-    subscription.createdAt?.toDate
-      ? subscription.createdAt.toDate().toLocaleDateString()
-      : subscription.createdAt,
-    60,
-    120
-  );
+  const subDate = subscription.createdAt?.toDate ? subscription.createdAt.toDate() : new Date(subscription.createdAt);
+  const subDateFormatted = `${String(subDate.getDate()).padStart(2, '0')}/${String(subDate.getMonth() + 1).padStart(2, '0')}/${subDate.getFullYear()}`;
+  doc.text(subDateFormatted, 60, 120);
 
   // Amount Section
   doc.setFillColor(249, 250, 251);
@@ -79,7 +79,9 @@ function generateInvoice(subscription: any, user: any) {
   doc.text("For questions, please contact support@yourcompany.com", 14, 182);
 
   // Save PDF
-  doc.save(`invoice_${subscription.plan}_${Date.now()}.pdf`);
+  const now = new Date();
+  const timestamp = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
+  doc.save(`invoice_${subscription.plan.replace(/\s+/g, '_')}_${timestamp}.pdf`);
 }
 
 interface Subscription {
@@ -160,19 +162,20 @@ export default function PaymentHistoryPage() {
     if (!filteredSubs.length) return;
 
     const header = ["Plan", "Amount", "Status", "Date"];
-    const rows = filteredSubs.map((s) => [
-      s.plan,
-      s.amount,
-      s.status,
-      s.createdAt?.toDate ? s.createdAt.toDate().toISOString() : s.createdAt,
-    ]);
+    const rows = filteredSubs.map((s) => {
+      const date = s.createdAt?.toDate ? s.createdAt.toDate() : new Date(s.createdAt);
+      const dateFormatted = `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
+      return [s.plan, s.amount, s.status, dateFormatted];
+    });
     const csvContent = [header, ...rows].map((e) => e.join(",")).join("\n");
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.setAttribute("download", `subscription_history_${Date.now()}.csv`);
+    const now = new Date();
+    const timestamp = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
+    link.setAttribute("download", `subscription_history_${timestamp}.csv`);
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -349,9 +352,10 @@ export default function PaymentHistoryPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-gray-700">
-                        {sub.createdAt?.toDate
-                          ? sub.createdAt.toDate().toLocaleDateString()
-                          : sub.createdAt}
+                        {(() => {
+                          const date = sub.createdAt?.toDate ? sub.createdAt.toDate() : new Date(sub.createdAt);
+                          return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
+                        })()}
                       </td>
                       <td className="px-6 py-4">
                         <button
