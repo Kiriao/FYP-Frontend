@@ -95,16 +95,63 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
   // Helper function to safely convert timestamp to date
   const getDateFromTimestamp = (timestamp: any): Date | null => {
     if (!timestamp) return null;
+    
+    // Firestore Timestamp object
     if (timestamp.toDate && typeof timestamp.toDate === 'function') {
       return timestamp.toDate();
     }
+    
+    // Firestore Timestamp with seconds
     if (timestamp.seconds) {
       return new Date(timestamp.seconds * 1000);
     }
+    
+    // Firestore Timestamp with _seconds (sometimes Firebase returns this)
+    if (timestamp._seconds) {
+      return new Date(timestamp._seconds * 1000);
+    }
+    
+    // ISO string or number
     if (typeof timestamp === 'string' || typeof timestamp === 'number') {
       return new Date(timestamp);
     }
+    
+    // Already a Date object
+    if (timestamp instanceof Date) {
+      return timestamp;
+    }
+    
     return null;
+  };
+
+  // Helper function to format date as DD/MM/YYYY
+  const formatDateDDMMYYYY = (timestamp: any): string => {
+    console.log("=== formatDateDDMMYYYY called ===");
+    console.log("Input timestamp:", timestamp);
+    console.log("Type:", typeof timestamp);
+    console.log("Is null/undefined:", timestamp == null);
+    
+    try {
+      const date = getDateFromTimestamp(timestamp);
+      console.log("Converted date:", date);
+      
+      if (!date || isNaN(date.getTime())) {
+        console.log("Invalid date, returning N/A");
+        return "N/A";
+      }
+      
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      
+      const formatted = `${day}/${month}/${year}`;
+      console.log("Final formatted date:", formatted);
+      
+      return formatted;
+    } catch (error) {
+      console.error("Error formatting date:", error);
+      return "N/A";
+    }
   };
 
   // Generate invoice for a single user
@@ -676,8 +723,9 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
                       <div className="flex items-center gap-1 text-sm text-gray-600">
                         <Calendar className="w-4 h-4" />
                         {(() => {
-                          const date = getDateFromTimestamp(u.createdAt);
-                          return date ? date.toLocaleDateString() : "N/A";
+                          const formattedDate = formatDateDDMMYYYY(u.createdAt);
+                          console.log("User:", u.fullName, "Raw createdAt:", u.createdAt, "Formatted:", formattedDate);
+                          return formattedDate;
                         })()}
                       </div>
                     </td>
