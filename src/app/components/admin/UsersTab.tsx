@@ -35,6 +35,7 @@ interface UserData {
 interface UsersTabProps {
   users: UserData[];
   setUsers: React.Dispatch<React.SetStateAction<UserData[]>>;
+  plans?: PlanOption[];
 }
 
 interface PlanOption {
@@ -50,12 +51,12 @@ interface Subscription {
   userId: string;
 }
 
-export default function UsersTab({ users, setUsers }: UsersTabProps) {
+export default function UsersTab({ users, setUsers, plans: propPlans }: UsersTabProps) {
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterRole, setFilterRole] = useState("all");
   const [filterPlan, setFilterPlan] = useState("all");
-  const [plans, setPlans] = useState<PlanOption[]>([]);
+  const [plans, setPlans] = useState<PlanOption[]>(propPlans || []);
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
@@ -74,9 +75,15 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
     plan: ""
   });
 
-  // Fetch plans from Firebase
+  // Fetch plans from Firebase or use props
   useEffect(() => {
     const fetchPlans = async () => {
+      // Only fetch if plans weren't passed as props
+      if (propPlans && propPlans.length > 0) {
+        setPlans(propPlans);
+        return;
+      }
+      
       try {
         const plansSnapshot = await getDocs(collection(db, "plans"));
         const plansData = plansSnapshot.docs.map(doc => ({
@@ -90,7 +97,7 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
     };
 
     fetchPlans();
-  }, []);
+  }, [propPlans]);
 
   // Helper function to safely convert timestamp to date
   const getDateFromTimestamp = (timestamp: any): Date | null => {
@@ -551,8 +558,10 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
     );
   };
 
-  // Get unique plan names from users for filter dropdown
-  const uniquePlans = Array.from(new Set(users.map(u => u.plan).filter(Boolean)));
+  // Get unique plan names from plans collection for filter dropdown
+  const planFilterOptions = plans.length > 0 
+    ? plans.map(p => p.name)
+    : Array.from(new Set(users.map(u => u.plan).filter(Boolean)));
 
   const stats = {
     total: users.length,
@@ -665,7 +674,7 @@ export default function UsersTab({ users, setUsers }: UsersTabProps) {
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent appearance-none bg-white"
             >
               <option value="all">All Plans</option>
-              {uniquePlans.map(plan => (
+              {planFilterOptions.map(plan => (
                 <option key={plan} value={plan}>{plan}</option>
               ))}
             </select>

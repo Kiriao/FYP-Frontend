@@ -568,7 +568,7 @@ useEffect(() => {
       case "overview":
         return <DashboardOverview />;
       case "users":
-        return <UsersTab users={users} setUsers={setUsers} />;
+  return <UsersTab users={users} setUsers={setUsers} plans={plans.map(p => ({ id: p.id, name: p.name }))} />;
       case "reviews":
         return <ReviewsTab reviews={reviews} fetchReviews={fetchReviews} />;
       case "contacts":
