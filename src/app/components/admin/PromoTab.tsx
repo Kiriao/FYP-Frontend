@@ -949,7 +949,7 @@ export default function PromoCodesTab({ promoCodes, onRefresh }: PromoCodesTabPr
                           Get {formData.discountType === 'percentage' 
                             ? `${formData.discountValue}% off` 
                             : `${formData.discountValue} off`}
-                          {formData.minPurchase > 0 && ` on orders over ${formData.minPurchase}`}
+                          {formData.minPurchase > 0 && ` on orders over $${formData.minPurchase}`}
                         </p>
                       </div>
                       <Ticket className="w-8 h-8 text-purple-400" />
