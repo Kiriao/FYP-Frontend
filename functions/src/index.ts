@@ -3,6 +3,7 @@ import * as logger from "firebase-functions/logger";
 import { fetch } from "undici";
 
 const API_BASE = process.env.APP_API_BASE || "";
+const APP_ORIGIN = (process.env.APP_PUBLIC_ORIGIN || "https://kidflix-4cda0.web.app").replace(/\/+$/, "");
 
 /* ------------ tiny helpers ------------ */
 async function getJSON<T = any>(url: string): Promise<T> {
@@ -13,6 +14,66 @@ async function getJSON<T = any>(url: string): Promise<T> {
 const pickItems = (d: any): any[] =>
   Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : Array.isArray(d?.results) ? d.results : [];
 const pickTitle = (x: any) => x?.title || x?.name || x?.volumeInfo?.title || x?.snippet?.title;
+
+/** Force HTTPS (avoid mixed-content blocking) */
+function httpsify(u?: string | null): string | null {
+  if (!u) return null;
+  try {
+    const url = new URL(u);
+    url.protocol = "https:";
+    if (/^books\.google\./i.test(url.hostname) && url.pathname.startsWith("/books/content")) {
+      url.hostname = "books.google.com";
+    }
+    return url.toString();
+  } catch {
+    return u.replace(/^http:\/\//i, "https://");
+  }
+}
+
+/** Build a deep link your web app will intercept to open the modal */
+function buildPreviewLink(kind: "book" | "video", data: Record<string, string | number | null | undefined>) {
+  const u = new URL(`${APP_ORIGIN}/preview`);
+  u.searchParams.set("type", kind);
+  for (const [k, v] of Object.entries(data)) {
+    if (v != null && v !== "") u.searchParams.set(k, String(v));
+  }
+  return u.toString();
+}
+
+function idForBook(x: any): string | null {
+  return x?.id || x?.volumeId || x?.volumeInfo?.industryIdentifiers?.[0]?.identifier || null;
+}
+function idForVideo(x: any): string | null {
+  return x?.id?.videoId || x?.videoId || null;
+}
+
+function pickThumb(x: any): string | null {
+  if (x?.thumbnail) return httpsify(x.thumbnail);
+  if (x?.volumeInfo?.imageLinks?.thumbnail) return httpsify(x.volumeInfo.imageLinks.thumbnail);
+  if (x?.snippet?.thumbnails?.medium?.url) return httpsify(x.snippet.thumbnails.medium.url);
+  if (x?.snippet?.thumbnails?.default?.url) return httpsify(x.snippet.thumbnails.default.url);
+  return null;
+}
+function pickLinkBook(x: any): string | null {
+  if (x?.bestLink) return httpsify(x.bestLink);
+  if (x?.previewLink) return httpsify(x.previewLink);
+  if (x?.canonicalVolumeLink) return httpsify(x.canonicalVolumeLink);
+  if (x?.infoLink) return httpsify(x.infoLink);
+  const v = x?.volumeInfo;
+  return httpsify(v?.previewLink || v?.canonicalVolumeLink || v?.infoLink || null);
+}
+function pickLinkVideo(x: any): string | null {
+  if (x?.url) return httpsify(x.url);
+  const vid = x?.id?.videoId || x?.videoId;
+  return vid ? `https://www.youtube.com/watch?v=${vid}` : null;
+}
+function makeInfoCard(title: string, subtitle: string | null, img: string | null, href: string | null) {
+  const card: any = { type: "info", title: title || "Untitled" };
+  if (subtitle) card.subtitle = subtitle;
+  if (img) card.image = { rawUrl: img };
+  if (href) card.actionLink = href; // Dialogflow Messenger "info" card link
+  return card;
+}
 
 type Canon =
   | "all" | "fiction" | "nonfiction" | "education" | "children_literature"
@@ -85,11 +146,12 @@ function videoQueryFor(canon: Canon): string {
   }
 }
 
-function replyText(res: any, text: string, extras: Record<string, any> = {}, payload?: any) {
+/* unified reply that also supports Messenger richContent */
+function reply(res: any, text: string, extras: Record<string, any> = {}, payload?: any) {
   try { res.setHeader?.("Content-Type", "application/json"); } catch {}
   const messages: any[] = [{ text: { text: [text] } }];
   if (payload) messages.push({ payload });
-  res.status(200).json({ fulfillment_response: { messages }, session_info: { parameters: { ...extras } } });
+  res.status(200).json({ fulfillment_response: { messages }, sessionInfo: { parameters: { ...extras } } });
 }
 
 export const cxWebhook = onRequest(
@@ -99,7 +161,6 @@ export const cxWebhook = onRequest(
     const tag = rawTag.toLowerCase();
     const params = (req.body?.sessionInfo?.parameters as Record<string, any>) || {};
 
-    // keep books/videos separate
     const rawBook  = clean(params.genre as string | undefined);
     const rawVideo = clean(params.genre_video as string | undefined);
     const bookCanon  = normGenre(rawBook);
@@ -116,7 +177,7 @@ export const cxWebhook = onRequest(
 
       if (isBooks) {
         if (!bookCanon) {
-          replyText(res, "Which book category are you after? (Fiction, Non Fiction, Education, Children’s Literature, Picture/Board/Early, Middle Grade, Poetry & Humor, Biography, Young Adult)");
+          reply(res, "Which book category are you after? (Fiction, Non Fiction, Education, Children’s Literature, Picture/Board/Early, Middle Grade, Poetry & Humor, Biography, Young Adult)");
           return;
         }
         const { term: bookTerm, juvenile } = bookQueryFor(bookCanon);
@@ -136,7 +197,9 @@ export const cxWebhook = onRequest(
             const data: any = await getJSON(u.toString());
             items = pickItems(data);
             usedUrl = u.toString(); source = "app";
-          } catch (e) { logger.warn("App /api/books failed, falling back to Google Books", { e: String(e) }); }
+          } catch (e) {
+            logger.warn("App /api/books failed, falling back to Google Books", { e: String(e) });
+          }
         }
         if (items.length === 0) {
           const u = new URL("https://www.googleapis.com/books/v1/volumes");
@@ -151,27 +214,66 @@ export const cxWebhook = onRequest(
         }
 
         const display = rawBook || bookCanon;
-        const top = items.slice(0, 3).map((it: any, i: number) => `${i + 1}. ${pickTitle(it) ?? "Untitled"}`).filter(Boolean);
+        const topItems = items.slice(0, 5);
+        const top = topItems.map((it: any, i: number) => `${i + 1}. ${pickTitle(it) ?? "Untitled"}`).filter(Boolean);
         const text = top.length
           ? `Here are some book picks${display ? ` on "${display}"` : ""}${age ? ` (age ${age})` : ""}:\n${top.join("\n")}`
           : `I couldn't find books${display ? ` on "${display}"` : ""}${age ? ` for age ${age}` : ""}. Try another category?`;
 
+        const cards = topItems.map((it: any) => {
+          const title = pickTitle(it) ?? "Untitled";
+          const authorList = (it?.authors && Array.isArray(it.authors) ? it.authors
+                              : it?.volumeInfo?.authors && Array.isArray(it.volumeInfo.authors) ? it.volumeInfo.authors
+                              : []) as string[];
+          const subtitle = authorList.length ? authorList.join(", ") : null;
+          const img = pickThumb(it);
+
+          const desc =
+            it?.description ||
+            it?.snippet ||
+            it?.volumeInfo?.description ||
+            "";
+
+          const href = buildPreviewLink("book", {
+            id: idForBook(it),
+            title,
+            image: img || "",
+            link: pickLinkBook(it) || "",
+            authors: authorList.join(", "),
+            snippet: String(desc).slice(0, 500),
+            category: String(bookCanon),
+            age: age ? String(age) : "",
+            source
+          });
+          return makeInfoCard(title, subtitle, img, href);
+        });
+
+        const chips = {
+          type: "chips",
+          options: [
+            { text: "More like this" },
+            { text: "Younger age" },
+            { text: "Non-fiction" }
+          ]
+        };
+
+        const payload = { richContent: [ cards.length ? [ ...cards ] : [], [chips] ] };
         logger.info("BOOKS", { canon: bookCanon, q: bookTerm, count: items.length, usedUrl, source });
 
-        replyText(res, text, {
+        reply(res, text, {
           books_done: true,
           genre: rawBook ?? "",
           category: bookCanon,
           lastQueryAt: new Date().toISOString(),
           lastQueryUrl: usedUrl,
           source
-        });
+        }, payload);
         return;
       }
 
       if (isVideos) {
         if (!videoCanon) {
-          replyText(res, "What kind of videos are you looking for? (Stories, Songs & Rhymes, Learning, Science, Math, Animals, Art & Crafts)");
+          reply(res, "What kind of videos are you looking for? (Stories, Songs & Rhymes, Learning, Science, Math, Animals, Art & Crafts)");
           return;
         }
         const vq = videoQueryFor(videoCanon);
@@ -189,7 +291,9 @@ export const cxWebhook = onRequest(
             const data: any = await getJSON(u.toString());
             items = pickItems(data);
             usedUrl = u.toString(); source = "app";
-          } catch (e) { logger.warn("App /api/videos failed, falling back to YouTube", { e: String(e) }); }
+          } catch (e) {
+            logger.warn("App /api/videos failed, falling back to YouTube", { e: String(e) });
+          }
         }
         if (items.length === 0) {
           const u = new URL("https://www.googleapis.com/youtube/v3/search");
@@ -206,14 +310,48 @@ export const cxWebhook = onRequest(
         }
 
         const display = rawVideo || videoCanon;
-        const top = items.slice(0, 3).map((it: any, i: number) => `${i + 1}. ${pickTitle(it) ?? "Untitled"}`).filter(Boolean);
+        const topItems = items.slice(0, 5);
+        const top = topItems.map((it: any, i: number) => `${i + 1}. ${pickTitle(it) ?? "Untitled"}`).filter(Boolean);
         const text = top.length
           ? `Here are some videos${display ? ` about "${display}"` : ""}:\n${top.join("\n")}`
           : `I couldn't find videos${display ? ` about "${display}"` : ""}. Try another topic?`;
 
+        // 🔻 Only this block changed (embed + watch URL in the deep-link)
+        const cards = topItems.map((it: any) => {
+          const title = pickTitle(it) ?? "Untitled";
+          const subtitle = it?.channel || it?.channelTitle || it?.snippet?.channelTitle || null;
+          const img = pickThumb(it);
+
+          const vid = idForVideo(it);
+          const watch = pickLinkVideo(it) || (vid ? `https://www.youtube.com/watch?v=${vid}` : "");
+          const embed = vid ? `https://www.youtube.com/embed/${vid}` : watch;
+
+          const href = buildPreviewLink("video", {
+            id: vid,
+            title,
+            image: img || "",
+            link: embed,           // for your iframe
+            url: watch,            // for "Watch on YouTube"
+            topic: String(videoCanon),
+            source
+          });
+
+          return makeInfoCard(title, subtitle, img, href);
+        });
+
+        const chips = {
+          type: "chips",
+          options: [
+            { text: "More like this" },
+            { text: "Shorter videos" },
+            { text: "Songs & Rhymes" }
+          ]
+        };
+
+        const payload = { richContent: [ cards.length ? [ ...cards ] : [], [chips] ] };
         logger.info("VIDEOS", { canon: videoCanon, q: vq, count: items.length, usedUrl, source });
 
-        replyText(res, text, {
+        reply(res, text, {
           videos_done: true,
           genre: "",
           genre_video: rawVideo ?? "",
@@ -221,14 +359,14 @@ export const cxWebhook = onRequest(
           lastQueryAt: new Date().toISOString(),
           lastQueryUrl: usedUrl,
           source
-        });
+        }, payload);
         return;
       }
 
-      replyText(res, `No fulfillment defined for tag "${rawTag || "(empty)"}".`);
+      reply(res, `No fulfillment defined for tag "${rawTag || "(empty)"}".`);
     } catch (err: any) {
       logger.error("Webhook error", { err: String(err?.message || err) });
-      replyText(res, "Something went wrong fetching results. Please try again.");
+      reply(res, "Something went wrong fetching results. Please try again.");
     }
   }
 );

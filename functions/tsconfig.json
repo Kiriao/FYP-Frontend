@@ -46,13 +46,15 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "commonjs",
-    "lib": ["ES2020"],
-    "outDir": "lib",
+    "module": "ES2020",
+    "moduleResolution": "Node",
+    "lib": ["ES2021"],
     "rootDir": "src",
+    "outDir": "lib",
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "resolveJsonModule": true
   },
   "include": ["src/**/*.ts"]
 }
