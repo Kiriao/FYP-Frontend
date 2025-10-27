@@ -948,7 +948,7 @@ export default function PromoCodesTab({ promoCodes, onRefresh }: PromoCodesTabPr
                         <p className="text-sm text-gray-600">
                           Get {formData.discountType === 'percentage' 
                             ? `${formData.discountValue}% off` 
-                            : `${formData.discountValue} off`}
+                            : `$${formData.discountValue} off`}
                           {formData.minPurchase > 0 && ` on orders over $${formData.minPurchase}`}
                         </p>
                       </div>
