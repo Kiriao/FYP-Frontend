@@ -36,25 +36,25 @@ export default function PreviewModalHost() {
     return () => window.removeEventListener("kidflix:open-preview", handler);
   }, []);
 
-  const handleOpenOriginal = () => {
-    if (!data?.link) return;
+const handleOpenOriginal = () => {
+  if (!data?.link) return;
 
-    let finalUrl = data.link;
+  let finalUrl = data.link;
 
-    // If the link is relative or doesn't start with http, construct with Vercel URL
-    if (!data.link.startsWith('http')) {
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
-      finalUrl = `${baseUrl}${data.link.startsWith('/') ? '' : '/'}${data.link}`;
-    }
-    // If it's the old Firebase URL, replace it with Vercel URL
-    else if (data.link.includes('kidflix-4cda0.web.app')) {
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
-      const path = data.link.replace(/https?:\/\/kidflix-4cda0\.web\.app/, '');
-      finalUrl = `${baseUrl}${path}`;
-    }
+  // Replace any Firebase URLs with Vercel URL
+  if (data.link.includes('kidflix-4cda0.web.app')) {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://fyp-frontend-coral.vercel.app';
+    const path = data.link.replace(/https?:\/\/kidflix-4cda0\.web\.app/g, '');
+    finalUrl = `${baseUrl}${path}`;
+  }
+  // Handle relative URLs
+  else if (!data.link.startsWith('http')) {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://fyp-frontend-coral.vercel.app';
+    finalUrl = `${baseUrl}${data.link.startsWith('/') ? '' : '/'}${data.link}`;
+  }
 
-    window.open(finalUrl, "_blank");
-  };
+  window.open(finalUrl, "_blank");
+};
 
   if (!open || !data) return null;
 
