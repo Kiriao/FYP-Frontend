@@ -11,8 +11,9 @@
     "deploy": "npm run build && firebase deploy --only functions"
   },
   "dependencies": {
+    "@google-cloud/cloud-sql-connector": "^1.8.4",
     "firebase-functions": "^4.9.0",
-    "undici": "^7.16.0"
+    "undici": "^7.15.0"
   },
   "devDependencies": {
     "@types/node": "^24.7.0",
