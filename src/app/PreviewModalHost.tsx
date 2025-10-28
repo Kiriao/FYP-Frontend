@@ -36,47 +36,60 @@ export default function PreviewModalHost() {
     return () => window.removeEventListener("kidflix:open-preview", handler);
   }, []);
 
+  const handleOpenOriginal = () => {
+    if (!data?.link) return;
+
+    let finalUrl = data.link;
+
+    // If the link is relative or doesn't start with http, construct with Vercel URL
+    if (!data.link.startsWith('http')) {
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+      finalUrl = `${baseUrl}${data.link.startsWith('/') ? '' : '/'}${data.link}`;
+    }
+    // If it's the old Firebase URL, replace it with Vercel URL
+    else if (data.link.includes('kidflix-4cda0.web.app')) {
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+      const path = data.link.replace(/https?:\/\/kidflix-4cda0\.web\.app/, '');
+      finalUrl = `${baseUrl}${path}`;
+    }
+
+    window.open(finalUrl, "_blank");
+  };
+
   if (!open || !data) return null;
 
-  // (fallback modal UI omitted for brevity — keep what you already have)
-
-  // 🔁 Replace this quick modal with your existing modal component if you have one
   return (
     <div
-      aria-modal
-      role="dialog"
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={() => setOpen(false)}
     >
       <div
-        className="w-[90vw] max-w-3xl rounded-2xl bg-white shadow-xl p-4 md:p-6"
+        className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex gap-4">
+        <div className="p-6">
           {data.image ? (
             <img
               src={data.image}
-              alt={data.title || "preview"}
-              className="w-36 h-52 object-cover rounded-lg flex-shrink-0"
+              alt={data.title}
+              className="w-full h-48 object-cover rounded-lg mb-4"
             />
           ) : null}
-          <div className="min-w-0">
-            <h2 className="text-xl font-semibold line-clamp-2">{data.title}</h2>
-            <p className="text-sm text-gray-500 mt-1">
+          <div className="space-y-3">
+            <h3 className="text-xl font-bold text-gray-900">{data.title}</h3>
+            <p className="text-sm text-gray-600">
               {data.type === "book" ? `Category: ${data.category || "-"}` : `Topic: ${data.topic || "-"}`}
               {data.age ? ` • Age: ${data.age}` : ""}
             </p>
-            <p className="text-xs text-gray-400 mt-1">Source: {data.source || "unknown"}</p>
-            <div className="mt-4 flex gap-2">
+            <p className="text-xs text-gray-500">Source: {data.source || "unknown"}</p>
+            <div className="flex gap-3 pt-3">
               {data.link ? (
-                <a
-                  href={data.link}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-3 py-2 text-sm rounded-lg bg-blue-600 text-white"
+                <button
+                  onClick={handleOpenOriginal}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
                 >
                   Open original
-                </a>
+                </button>
               ) : null}
               <button
                 onClick={() => setOpen(false)}

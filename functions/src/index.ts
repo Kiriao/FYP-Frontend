@@ -14,7 +14,7 @@ setGlobalOptions({ region: "asia-southeast1", timeoutSeconds: 120 });
 
 /* ------------ config ------------ */
 const API_BASE = process.env.APP_API_BASE || "";
-const APP_ORIGIN = (process.env.APP_PUBLIC_ORIGIN || "https://fyp-frontend-coral.vercel.app").replace(/\/+$/, "");
+const APP_ORIGIN = (process.env.APP_PUBLIC_ORIGIN || "https://kidflix-4cda0.web.app").replace(/\/+$/, "");
 
 /* ------------ tiny helpers ------------ */
 async function getJSON<T = any>(url: string): Promise<T> {

@@ -2,7 +2,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { fetch } from "undici";
 const API_BASE = process.env.APP_API_BASE || "";
-const APP_ORIGIN = (process.env.APP_PUBLIC_ORIGIN || "https://fyp-frontend-coral.vercel.app").replace(/\/+$/, "");
+const APP_ORIGIN = (process.env.APP_PUBLIC_ORIGIN || "https://kidflix-4cda0.web.app").replace(/\/+$/, "");
 /* ------------ tiny helpers ------------ */
 async function getJSON(url) {
     const r = await fetch(url, { headers: { accept: "application/json" } });
