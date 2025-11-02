@@ -724,7 +724,7 @@ if (appliedPromo && promoDocId) {
                         />
                       </div>
                       <p className="text-sm text-gray-600 mt-4">
-                        After payment, click "Confirm Payment" below
+                        After payment, click "Pay" below
                       </p>
                     </div>
 
