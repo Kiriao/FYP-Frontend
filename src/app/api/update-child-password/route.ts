@@ -1,59 +1,8 @@
-// api/update-child-password/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import admin from "firebase-admin";
 
-// Initialize Firebase Admin only once
-if (!admin.apps.length) {
-  try {
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY;
-    const projectId = process.env.FIREBASE_PROJECT_ID;
-    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-    
-    if (!privateKey || !projectId || !clientEmail) {
-      throw new Error("Missing Firebase configuration environment variables");
-    }
-
-    // Properly decode the private key
-    let formattedPrivateKey = privateKey;
-    
-    // If the key is base64 encoded, decode it first
-    if (!privateKey.includes('BEGIN PRIVATE KEY')) {
-      try {
-        formattedPrivateKey = Buffer.from(privateKey, 'base64').toString('utf8');
-      } catch (e) {
-        formattedPrivateKey = privateKey;
-      }
-    }
-    
-    // Replace escaped newlines with actual newlines
-    formattedPrivateKey = formattedPrivateKey.replace(/\\n/g, '\n');
-    
-    // Ensure proper formatting
-    if (!formattedPrivateKey.startsWith('-----BEGIN PRIVATE KEY-----')) {
-      formattedPrivateKey = '-----BEGIN PRIVATE KEY-----\n' + 
-        formattedPrivateKey.replace(/-----BEGIN PRIVATE KEY-----/g, '')
-                          .replace(/-----END PRIVATE KEY-----/g, '')
-                          .trim() + 
-        '\n-----END PRIVATE KEY-----\n';
-    }
-
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId,
-        clientEmail,
-        privateKey: formattedPrivateKey,
-      }),
-    });
-    
-    console.log("Firebase Admin initialized successfully");
-  } catch (error) {
-    console.error("Firebase Admin initialization error:", error);
-    throw error;
-  }
-}
-
-const auth = admin.auth();
-const db = admin.firestore();
+// Don't import admin at the top level - use dynamic import instead
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   try {
@@ -63,7 +12,7 @@ export async function POST(req: NextRequest) {
 
     if (!parentId || !childId || !newPassword) {
       return NextResponse.json(
-        { success: false, error: "Missing required fields" }, 
+        { success: false, error: "Missing required fields" },
         { status: 400 }
       );
     }
@@ -71,17 +20,21 @@ export async function POST(req: NextRequest) {
     // Validate password length
     if (newPassword.length < 6) {
       return NextResponse.json(
-        { success: false, error: "Password must be at least 6 characters" }, 
+        { success: false, error: "Password must be at least 6 characters" },
         { status: 400 }
       );
     }
 
+    // Dynamically import Firebase Admin only when the route is called
+    const { getFirebaseAdmin } = await import("@/lib/firebase-admin");
+    const { auth, db } = getFirebaseAdmin();
+
     // Verify the parent owns this child
     const childDoc = await db.collection("users").doc(childId).get();
-    
+
     if (!childDoc.exists) {
       return NextResponse.json(
-        { success: false, error: "Child not found" }, 
+        { success: false, error: "Child not found" },
         { status: 404 }
       );
     }
@@ -89,7 +42,7 @@ export async function POST(req: NextRequest) {
     const childData = childDoc.data();
     if (childData?.parentId !== parentId) {
       return NextResponse.json(
-        { success: false, error: "Unauthorized: You don't have permission to update this child" }, 
+        { success: false, error: "Unauthorized: You don't have permission to update this child" },
         { status: 403 }
       );
     }
@@ -103,7 +56,7 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error("Error updating child password:", err);
     return NextResponse.json(
-      { success: false, error: err.message || "Internal server error" }, 
+      { success: false, error: err.message || "Internal server error" },
       { status: 500 }
     );
   }
