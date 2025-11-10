@@ -19,6 +19,11 @@ export default function EnhancedLandingPage() {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
+  const [showVideoModal, setShowVideoModal] = useState(false);
+
+  // Cloudinary configuration
+  const CLOUDINARY_CLOUD_NAME = "dinui38ls";
+  const VIDEO_PUBLIC_ID = "MARKETING__VIDEO__FINAL_lfcwq1";
 
   const fetchReviews = async () => {
     try {
@@ -52,6 +57,17 @@ export default function EnhancedLandingPage() {
     }
   }, [reviews, isHovered]);
 
+  // Close modal on ESC key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showVideoModal) {
+        setShowVideoModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [showVideoModal]);
+
   const visibleReviews = reviews.length > 3
     ? [
         reviews[currentIndex],
@@ -60,8 +76,63 @@ export default function EnhancedLandingPage() {
       ]
     : reviews;
 
+  // Cloudinary video URL with optimizations
+  const videoUrl = `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/video/upload/q_auto/${VIDEO_PUBLIC_ID}.mp4`;
+  const posterUrl = `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/video/upload/so_0/${VIDEO_PUBLIC_ID}.jpg`;
+
   return (
     <main className="bg-white overflow-hidden">
+      {/* Video Modal Popup */}
+      {showVideoModal && (
+        <div 
+          className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 animate-fadeIn"
+          onClick={() => setShowVideoModal(false)}
+        >
+          <div 
+            className="relative bg-gradient-to-br from-gray-900 to-black rounded-3xl max-w-5xl w-full shadow-2xl overflow-hidden animate-scaleIn"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close Button */}
+            <button
+              onClick={() => setShowVideoModal(false)}
+              className="absolute -top-4 -right-4 bg-white text-gray-800 rounded-full w-12 h-12 flex items-center justify-center shadow-2xl hover:bg-red-500 hover:text-white transition-all duration-300 z-20 font-bold text-xl hover:rotate-90"
+              aria-label="Close video"
+            >
+              ✕
+            </button>
+            
+            {/* Video Title */}
+            <div className="bg-gradient-to-r from-pink-600 to-purple-600 p-4 text-center">
+              <h3 className="text-2xl font-bold text-white flex items-center justify-center gap-2">
+                <FaPlay className="text-yellow-300" />
+                KidFlix Demo Video
+              </h3>
+            </div>
+
+            {/* Video Container */}
+            <div className="p-6 bg-black">
+              <div className="relative rounded-xl overflow-hidden shadow-2xl">
+                <video 
+                  controls 
+                  autoPlay
+                  className="w-full h-auto"
+                  poster={posterUrl}
+                  preload="metadata"
+                >
+                  <source src={videoUrl} type="video/mp4" />
+                  Your browser does not support the video tag.
+                </video>
+              </div>
+              
+              {/* Helper text */}
+              <p className="text-gray-400 text-sm text-center mt-4">
+                Press ESC or click outside to close
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Hero Section */}
       <section className="relative min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-500 via-purple-500 to-indigo-600 text-white overflow-hidden">
         {/* Animated Background Elements */}
@@ -100,8 +171,11 @@ export default function EnhancedLandingPage() {
               <FaPlay className="group-hover:translate-x-1 transition-transform" />
             </a>
             
-            <button className="border-2 border-white/30 backdrop-blur-sm text-white font-semibold px-8 py-4 rounded-full hover:bg-white/10 transition-all duration-300 flex items-center gap-2">
-              <FaVideo />
+            <button 
+              onClick={() => setShowVideoModal(true)}
+              className="border-2 border-white/30 backdrop-blur-sm text-white font-semibold px-8 py-4 rounded-full hover:bg-white/10 transition-all duration-300 flex items-center gap-2 hover:scale-105 transform"
+            >
+              <FaVideo className="animate-pulse" />
               Watch Demo
             </button>
           </div>
@@ -370,6 +444,32 @@ export default function EnhancedLandingPage() {
           </div>
         </div>
       </section>
+
+      <style jsx>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        
+        @keyframes scaleIn {
+          from { 
+            opacity: 0;
+            transform: scale(0.9);
+          }
+          to { 
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+        
+        .animate-fadeIn {
+          animation: fadeIn 0.3s ease-out;
+        }
+        
+        .animate-scaleIn {
+          animation: scaleIn 0.3s ease-out;
+        }
+      `}</style>
     </main>
   );
 }
