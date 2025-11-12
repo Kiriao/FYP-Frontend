@@ -26,14 +26,35 @@ function buildWordBoundaryRegex(terms) {
     const pattern = `\\b(?:${escaped.join("|")})\\b`;
     return new RegExp(pattern, "i");
 }
-function findRestrictedTerms(input, restrictedTerms) {
-    const norm = normalizeForMatch(input);
-    const hits = new Set();
-    for (const term of restrictedTerms) {
-        const reSingle = buildWordBoundaryRegex([term]);
-        if (reSingle.test(norm))
-            hits.add(term);
+// export function findRestrictedTerms(input: string, restrictedTerms: string[]): string[] {
+//   const norm = normalizeForMatch(input);
+//   const hits = new Set<string>();
+//   for (const term of restrictedTerms) {
+//     const reSingle = buildWordBoundaryRegex([term]);
+//     if (reSingle.test(norm)) hits.add(term);
+//   }
+//   return Array.from(hits);
+// }
+// liberal match: case-insensitive, substring (with basic word-ish boundaries)
+function findRestrictedTerms(text, restricted) {
+    if (!text || !Array.isArray(restricted))
+        return [];
+    const t = String(text).toLowerCase();
+    const hits = [];
+    for (const raw of restricted) {
+        const q = String(raw || "").trim().toLowerCase();
+        if (!q)
+            continue;
+        // allow "blood", "bloodshed", "bloody" to match "blood"
+        // but avoid matching super tiny tokens inside words accidentally
+        const pat = q.length <= 3 ? new RegExp(`\\b${escapeRx(q)}\\b`, "i")
+            : new RegExp(`${escapeRx(q)}`, "i");
+        if (pat.test(t))
+            hits.push(raw);
     }
-    return Array.from(hits);
+    return hits;
+}
+function escapeRx(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 //# sourceMappingURL=restrictions.js.map

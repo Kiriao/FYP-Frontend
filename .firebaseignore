@@ -1,0 +1,10 @@
+**/node_modules
+**/.git
+firebase-debug.log
+
+# make sure functions build output and sources aren’t excluded
+!functions/lib/**
+!functions/src/**
+!functions/tsconfig.json
+!functions/package.json
+!functions/package-lock.json

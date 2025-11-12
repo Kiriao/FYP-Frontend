@@ -7,7 +7,8 @@ import { findRestrictedTerms } from "./lib/restrictions";
 if (!getApps().length) initializeApp();
 const db = getFirestore();
 
-export const moderateMessage = onRequest(async (req, res) => {
+export const moderateMessage = onRequest(
+    { region: "asia-southeast1", timeoutSeconds: 60 }, async (req, res) => {
   try {
     const { userId, message } = req.body || {};
     if (!userId || !message) {
