@@ -9,7 +9,7 @@ const restrictions_1 = require("./lib/restrictions");
 if (!(0, app_1.getApps)().length)
     (0, app_1.initializeApp)();
 const db = (0, firestore_1.getFirestore)();
-exports.moderateMessage = (0, https_1.onRequest)(async (req, res) => {
+exports.moderateMessage = (0, https_1.onRequest)({ region: "asia-southeast1", timeoutSeconds: 60 }, async (req, res) => {
     try {
         const { userId, message } = req.body || {};
         if (!userId || !message) {

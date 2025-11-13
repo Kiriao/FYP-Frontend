@@ -1,0 +1,9 @@
+# Don’t upload dependencies
+node_modules/
+
+# Re-include build output and essentials (override .gitignore)
+!lib/**
+!src/**
+!package.json
+!package-lock.json
+!tsconfig.json
