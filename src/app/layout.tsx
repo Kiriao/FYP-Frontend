@@ -1,4 +1,5 @@
 /// <reference path="../types/dialogflow-messenger.d.ts" />
+import GlobalPreviewModalHost from "@/app/components/PreviewModal";
 
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
@@ -28,7 +29,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <ClientLayout>{children}</ClientLayout>
+        <ClientLayout>{children}
+        <GlobalPreviewModalHost />
+        </ClientLayout>
       </body>
     </html>
   );

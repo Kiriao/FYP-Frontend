@@ -23,6 +23,8 @@ export default function LoginPage() {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
+      // persist uid so DialogflowMessenger can attach it
+      localStorage.setItem("kidflix_uid", user.uid);
 
       const userDoc = await getDoc(doc(db, "users", user.uid));
       if (!userDoc.exists()) {
@@ -53,9 +55,13 @@ export default function LoginPage() {
         case "parent":
         case "educator":
         case "child":
+          // Persist uid for the chat widget (used by DialogflowMessenger)
+          localStorage.setItem("kidflix_uid", user.uid);
           router.push("/");
           break;
         default:
+          // Persist uid for the chat widget (used by DialogflowMessenger)
+          localStorage.setItem("kidflix_uid", user.uid);
           router.push("/");
       }
     } catch (err: any) {

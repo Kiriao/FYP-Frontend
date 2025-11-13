@@ -8,7 +8,7 @@ import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import DialogflowMessenger from "@/app/components/DialogflowMessenger";
 import ResponsiveWrapper from "@/app/components/ResponsiveWrapper";
-import PreviewModalHost from "@/app/PreviewModalHost";   // <-- add this
+import GlobalPreviewModalHost from "@/app/components/PreviewModal";
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const [role, setRole] = useState<string | null>(null);
@@ -42,7 +42,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       {showMessenger && <DialogflowMessenger />}
 
       {/* 🔽 This listens for "kidflix:open-preview" and renders the modal */}
-      <PreviewModalHost />
+      <GlobalPreviewModalHost />
     </>
   );
 }

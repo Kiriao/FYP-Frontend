@@ -33,38 +33,227 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.rebuildUserProfileHttp = exports.upsertItemsHttp = exports.embedItems = exports.annSearch = exports.annUpsert = exports.embed = exports.cxWebhook = exports.recommendForUser = void 0;
+exports.clearHistory = exports.rebuildUserProfileHttp = exports.upsertItemsHttp = exports.embedItems = exports.annSearch = exports.annUpsert = exports.embed = exports.annCount = exports.health = exports.cxWebhook = exports.moderateMessage = exports.recommendForUser = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const logger = __importStar(require("firebase-functions/logger"));
+const v2_1 = require("firebase-functions/v2");
 const undici_1 = require("undici");
 const openai_1 = require("./lib/openai");
 const pg_1 = require("pg");
 var recommend_1 = require("./recommend");
 Object.defineProperty(exports, "recommendForUser", { enumerable: true, get: function () { return recommend_1.recommendForUser; } });
+var moderation_1 = require("./moderation");
+Object.defineProperty(exports, "moderateMessage", { enumerable: true, get: function () { return moderation_1.moderateMessage; } });
 const items_1 = require("./items");
 const users_1 = require("./users");
-// ⬇️ removed: import { embedText, upsertVectors, findNeighbors } from "./vertex";
-/* ------------ config ------------ */
-const API_BASE = process.env.APP_API_BASE || "";
+const app_1 = require("firebase-admin/app");
+const firestore_1 = require("firebase-admin/firestore");
+const restrictions_1 = require("./lib/restrictions");
+/* -------------------------------- bootstrap -------------------------------- */
+if (!(0, app_1.getApps)().length)
+    (0, app_1.initializeApp)();
+const db = (0, firestore_1.getFirestore)();
+(0, v2_1.setGlobalOptions)({ region: "asia-southeast1", timeoutSeconds: 120 });
+/* --------------------------------- config --------------------------------- */
+const API_BASE = (process.env.APP_API_BASE || "").replace(/\/+$/, "");
 const APP_ORIGIN = (process.env.APP_PUBLIC_ORIGIN || "https://kidflix-4cda0.web.app").replace(/\/+$/, "");
-/* ------------ tiny helpers ------------ */
-async function getJSON(url) {
-    const r = await (0, undici_1.fetch)(url, { headers: { accept: "application/json" } });
-    if (!r.ok)
-        throw new Error(`HTTP ${r.status} for ${url}`);
-    return (await r.json());
+const RECOMMENDER_URL = process.env.RECOMMENDER_URL ||
+    "https://asia-southeast1-kidflix-4cda0.cloudfunctions.net/recommendForUser";
+/* -------------------------------- helpers --------------------------------- */
+function isKnownGenreTerm(s) {
+    if (!s)
+        return false;
+    const canon = normGenre(s);
+    return !!GENRE_ALIASES[canon];
 }
-const pickItems = (d) => Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : Array.isArray(d?.results) ? d.results : [];
-const pickTitle = (x) => x?.title || x?.name || x?.volumeInfo?.title || x?.snippet?.title;
-const pickAuthorsArray = (x) => {
-    if (Array.isArray(x?.authors))
-        return x.authors;
-    if (Array.isArray(x?.volumeInfo?.authors))
-        return x.volumeInfo.authors;
-    return [];
-};
-const pickDescription = (x) => x?.description || x?.snippet || x?.volumeInfo?.description || x?.searchInfo?.textSnippet || "";
-/** Force HTTPS (avoid mixed-content blocking) */
+/** Build 3–5 personalized suggestion chips from profile/history. */
+async function buildPersonalizedSuggestions(userId, lang = "en") {
+    const suggestions = [];
+    try {
+        if (userId) {
+            const uref = db.collection("users").doc(userId);
+            const usnap = await uref.get();
+            // try explicit interests first (array of strings)
+            const interests = Array.isArray(usnap.get("interests")) ? usnap.get("interests") : [];
+            // try last categories/topics we saved in chat thread state
+            // (we store these in chat_threads via reply())
+            const historySnap = await db.collection("chat_threads")
+                .where("updatedAt", ">=", Date.now() - 30 * 24 * 3600 * 1000)
+                .limit(10).get();
+            const recentTags = new Set();
+            historySnap.forEach(doc => {
+                const d = doc.data() || {};
+                if (typeof d.category === "string" && d.category)
+                    recentTags.add(d.category);
+                if (typeof d.topic === "string" && d.topic)
+                    recentTags.add(d.topic);
+                if (typeof d.genre === "string" && d.genre)
+                    recentTags.add(d.genre);
+            });
+            // compose a candidate pool (interests first, then recents)
+            const pool = [...interests, ...Array.from(recentTags)];
+            // simple canonicalization & de-dup
+            const uniq = Array.from(new Set(pool
+                .map(s => s.trim())
+                .filter(Boolean)
+                .slice(0, 10)));
+            // turn into natural asks for kids
+            for (const t of uniq) {
+                const canon = t.toLowerCase();
+                if (canon.includes("video"))
+                    suggestions.push(`${t}`);
+                else
+                    suggestions.push(`${t} books`);
+                if (suggestions.length >= 5)
+                    break;
+            }
+        }
+    }
+    catch { /* non-fatal */ }
+    // as a final safety, add some generic-but-useful kid topics
+    if (suggestions.length < 3) {
+        ["animal stories", "space books", "science videos", "mystery books", "math videos"]
+            .forEach(s => { if (!suggestions.includes(s))
+            suggestions.push(s); });
+    }
+    return suggestions.slice(0, 5);
+}
+function unquote(s) { return s.replace(/^["']|["']$/g, "").trim(); }
+// Render a numbered list like "1. Title (book/video)" for the first n items
+function asNumbered(items, n = 5) {
+    return items.slice(0, n)
+        .map((it, i) => {
+        const k = (it.type || it.kind) === "video" ? "video" : "book";
+        return `${i + 1}. ${it.title} (${k})`;
+    })
+        .join("\n");
+}
+function readAuthorParam(p, utterance) {
+    // DF may send @sys.person as a string or an object { name, givenName, ... }
+    const cand = (typeof p?.author === "string" && p.author) ||
+        (typeof p?.author?.name === "string" && p.author.name) ||
+        (typeof p?.person === "string" && p.person) ||
+        (typeof p?.person?.name === "string" && p.person.name) ||
+        "";
+    if (cand)
+        return cand.trim();
+    // last-resort: pull “… books by|from X” or “X books”
+    const ql = (utterance || "").toLowerCase().trim();
+    const mBy = ql.match(/\bbooks?\s+(?:by|from)\s+([\p{L}\p{N}\s.\-'"&]+)$/u);
+    const mTail = ql.match(/^([\p{L}\p{N}\s.\-'"&]+)\s+books?$/u);
+    return (mBy?.[1] || mTail?.[1] || "").trim();
+}
+// ---- NEW (global): author candidate extractor (forgiving) ----
+function extractAuthorCandidate(q) {
+    const ql = (q || "").toLowerCase().trim();
+    // patterns: "books by X", "books from X"
+    const mBy = ql.match(/\bbooks?\s+(?:by|from)\s+([\p{L}\p{N}\s.\-'"&]+)$/u);
+    if (mBy)
+        return (mBy[1] || "").trim();
+    // "X books"
+    const mTail = ql.match(/^([\p{L}\p{N}\s.\-'"&]+)\s+books?$/u);
+    if (mTail)
+        return (mTail[1] || "").trim();
+    // bare name fallback if user typed two+ tokens and the intent/tag says books
+    const mBare = ql.match(/^([a-z][a-z'.\-]+(?:\s+[a-z'.\-]+){1,3})$/i);
+    if (mBare)
+        return (mBare[1] || "").trim();
+    return "";
+}
+// --- helpers
+function ensureAnonId(req) {
+    // stable device ID for signed-out users
+    const h = req.headers["x-device-id"];
+    return h &&
+        h.length > 10 ? h : hashKey((req.ip || "") + (req.headers["user-agent"] || "guest"));
+}
+function currentUserId(req, params) {
+    const hdr = req.headers["x-user-id"]?.trim() || "";
+    const param = (typeof params?.userId === "string" ? params.userId : "").trim();
+    const uid = hdr || param;
+    return uid ? `uid:${uid}` : `anon:${ensureAnonId(req)}`;
+}
+function threadKey(u, session) {
+    // 1 user can have many threads (tabs/devices)
+    const s = (session && String(session).slice(-36)) || "default";
+    return `${u}::${s}`;
+}
+async function loadThreadState(u, s) {
+    const ref = db.collection("chat_threads").doc(threadKey(u, s));
+    const snap = await ref.get();
+    return snap.exists ? snap.data() : {};
+}
+async function saveThreadState(u, s, patch) {
+    const ref = db.collection("chat_threads").doc(threadKey(u, s));
+    await ref.set({ ...patch, updatedAt: Date.now() }, { merge: true });
+}
+/** Decide whether a free text like "nonfiction" is category/title/author/topic. */
+async function resolveBookQuery(term, lang) {
+    const raw = (term || "").trim();
+    if (!raw)
+        return { mode: "topic", q: "", display: "" };
+    // 1) category?
+    if (isKnownGenreTerm(raw)) {
+        const canon = normGenre(raw);
+        return { mode: "category", canon, display: raw };
+    }
+    // 2) quoted text biases to title
+    const quoted = /^["'].*["']$/.test(raw);
+    const clean = unquote(raw);
+    // 3) probe author vs title (1 small page each)
+    const [aProbe, tProbe] = await Promise.all([
+        fetchBooksBySearch(`inauthor:"${clean}"`, { page: 1, pageSize: 8, lang }),
+        fetchBooksBySearch(`intitle:"${clean}"`, { page: 1, pageSize: 8, lang }),
+    ]);
+    const aN = (aProbe.items || []).length;
+    const tN = (tProbe.items || []).length;
+    // thresholds: need at least a few, and 20% lead
+    if (aN >= 3 && aN >= Math.max(3, tN * 1.1))
+        return { mode: "author", q: `inauthor:"${clean}"`, display: clean };
+    if (tN >= 4 && (tN >= aN * 1.2 || quoted))
+        return { mode: "title", q: `intitle:"${clean}"`, display: clean };
+    // 4) default → topic free text
+    return { mode: "topic", q: clean, display: clean };
+}
+/** Lowercase + remove helper verbs/stopwords commonly seen in “recommend me books”. */
+function normalizeForIntent(s) {
+    if (!s)
+        return "";
+    return s
+        .toLowerCase()
+        .replace(/\u00a0/g, " ")
+        .replace(/\b(recommend|suggest|show|find|search|give|tell|list|want|need|like|some|any|pls|please|for|from|by|kids|kid|children|child|me|us|the|a|an|on|about|regarding|around)\b/g, " ")
+        .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+/** True if user basically asked only for “books” or “videos” (after stripping helpers). */
+function isGenericAsk(raw) {
+    const t = normalizeForIntent(raw);
+    const books = t === "book" || t === "books";
+    const videos = t === "video" || t === "videos";
+    return { books, videos, generic: books || videos || t === "" };
+}
+function isLowInfo(text) {
+    const t = (text || "").trim();
+    if (!t)
+        return true;
+    const norm = normalizeForIntent(t);
+    // NEW: known book/video genres (e.g., "fiction", "nonfiction", "education") are informative
+    if (isKnownGenreTerm(norm))
+        return false;
+    const words = norm.split(/\s+/).filter(Boolean);
+    if (words.length <= 1)
+        return true;
+    if (norm.length <= 3)
+        return true;
+    const uniq = new Set(norm.replace(/\s+/g, "").split(""));
+    return uniq.size <= 3;
+}
+/** Make “topic for kids” bias if user didn’t already say it. */
+function ensureForKids(s) {
+    return /\bfor\s+kids\b/i.test(s) ? s : `${s} for kids`;
+}
 function httpsify(u) {
     if (!u)
         return null;
@@ -80,22 +269,40 @@ function httpsify(u) {
         return u.replace(/^http:\/\//i, "https://");
     }
 }
-/** Build a deep link your web app will intercept to open the modal */
-function buildPreviewLink(kind, data) {
-    const u = new URL(`${APP_ORIGIN}/preview`);
-    u.searchParams.set("type", kind);
-    for (const [k, v] of Object.entries(data)) {
-        if (v != null && v !== "")
-            u.searchParams.set(k, String(v));
-    }
-    return u.toString();
+function getJSON(url) {
+    return (0, undici_1.fetch)(url, { headers: { accept: "application/json" } }).then(async (r) => {
+        if (!r.ok)
+            throw new Error(`HTTP ${r.status} for ${url}`);
+        return (await r.json());
+    });
 }
-function idForBook(x) {
-    return x?.id || x?.volumeId || x?.volumeInfo?.industryIdentifiers?.[0]?.identifier || null;
+function hashKey(s) {
+    let h = 0, i = 0;
+    while (i < s.length)
+        h = (h * 31 + s.charCodeAt(i++)) | 0;
+    return String(h >>> 0);
 }
-function idForVideo(x) {
-    return x?.id?.videoId || x?.videoId || null;
-}
+const pickItems = (d) => Array.isArray(d) ? d :
+    Array.isArray(d?.items) ? d.items :
+        Array.isArray(d?.results) ? d.results : [];
+const pickTitle = (x) => x?.title || x?.name || x?.volumeInfo?.title || x?.snippet?.title || "";
+const pickAuthorsArray = (x) => Array.isArray(x?.authors) ? x.authors :
+    Array.isArray(x?.volumeInfo?.authors) ? x.volumeInfo.authors : [];
+const pickDescription = (x) => x?.description || x?.snippet || x?.volumeInfo?.description || x?.searchInfo?.textSnippet || "";
+const looksLikePlaceholder = (s) => typeof s === "string" &&
+    (/^\s*\$intent\.params/i.test(s) || /^\s*\$page\.params/i.test(s) || /^\s*\$session\.params/i.test(s));
+const clean = (s) => {
+    if (s == null)
+        return "";
+    if (typeof s !== "string")
+        return String(s ?? "");
+    const t = s.trim();
+    if (!t || t === "null" || t === "undefined" || t === '""' || t === "''" || looksLikePlaceholder(t))
+        return "";
+    return t;
+};
+const idForBook = (x) => x?.id || x?.volumeId || x?.volumeInfo?.industryIdentifiers?.[0]?.identifier || null;
+const idForVideo = (x) => x?.id?.videoId || x?.videoId || null;
 function pickThumb(x) {
     if (x?.thumbnail)
         return httpsify(x.thumbnail);
@@ -135,47 +342,33 @@ function makeInfoCard(title, subtitle, img, href) {
         card.actionLink = href;
     return card;
 }
+function buildPreviewLink(kind, data) {
+    const u = new URL(`${APP_ORIGIN}/preview`);
+    u.searchParams.set("type", kind);
+    for (const [k, v] of Object.entries(data)) {
+        if (v != null && v !== "")
+            u.searchParams.set(k, String(v));
+    }
+    return u.toString();
+}
+const dfLink = (kind, raw, extra) => {
+    const id = kind === "book" ? idForBook(raw) : idForVideo(raw);
+    const link = kind === "book" ? (pickLinkBook(raw) || "") : (pickLinkVideo(raw) || "");
+    return buildPreviewLink(kind, { id, title: pickTitle(raw), image: pickThumb(raw) || "", link, ...extra });
+};
 const GENRE_ALIASES = {
-    // books
-    "all": "all",
-    "fiction": "fiction",
-    "fiction book": "fiction",
-    "fiction books": "fiction",
-    "non fiction": "nonfiction",
-    "non-fiction": "nonfiction",
-    "nonfiction": "nonfiction",
-    "non fiction book": "nonfiction",
-    "nonfiction book": "nonfiction",
+    "all": "all", "fiction": "fiction", "fiction book": "fiction", "fiction books": "fiction",
+    "non fiction": "nonfiction", "non-fiction": "nonfiction", "nonfiction": "nonfiction", "non fiction book": "nonfiction", "nonfiction book": "nonfiction",
     "education": "education", "educational": "education",
     "children s literature": "children_literature", "childrens literature": "children_literature",
-    "picture board early": "picture_board_early", "picture books": "picture_board_early",
-    "board books": "picture_board_early", "early reader": "picture_board_early", "early readers": "picture_board_early",
-    "middle grade": "middle_grade",
-    "poetry humor": "poetry_humor", "poetry & humor": "poetry_humor", "funny": "poetry_humor",
-    "biography": "biography", "other kids": "other_kids",
-    "young adult": "young_adult", "ya": "young_adult",
-    // videos
-    "stories": "stories", "story": "stories",
-    "songs rhymes": "songs_rhymes", "song": "songs_rhymes", "songs": "songs_rhymes", "nursery rhymes": "songs_rhymes",
-    "learning": "learning", "learning videos": "learning",
-    "science": "science", "stem": "science",
-    "math": "math", "mathematics": "math",
-    "animals": "animals", "wildlife": "animals", "pets": "animals",
+    "picture board early": "picture_board_early", "picture books": "picture_board_early", "board books": "picture_board_early", "early reader": "picture_board_early", "early readers": "picture_board_early",
+    "middle grade": "middle_grade", "poetry humor": "poetry_humor", "poetry & humor": "poetry_humor", "funny": "poetry_humor",
+    "biography": "biography", "other kids": "other_kids", "young adult": "young_adult", "ya": "young_adult",
+    "stories": "stories", "story": "stories", "songs rhymes": "songs_rhymes", "song": "songs_rhymes", "songs": "songs_rhymes", "nursery rhymes": "songs_rhymes",
+    "learning": "learning", "learning videos": "learning", "science": "science", "stem": "science",
+    "math": "math", "mathematics": "math", "animals": "animals", "wildlife": "animals", "pets": "animals",
     "art crafts": "art_crafts", "arts crafts": "art_crafts", "art and crafts": "art_crafts", "art & crafts": "art_crafts",
-    // topical extras (kept for 1-word genre taps)
-    "space": "science", "fantasy": "fiction", "mystery": "fiction",
-    "coding": "education", "programming": "education"
-};
-const looksLikePlaceholder = (s) => typeof s === "string" && (/^\s*\$intent\.params/i.test(s) || /^\s*\$page\.params/i.test(s) || /^\s*\$session\.params/i.test(s));
-const clean = (s) => {
-    if (s == null)
-        return "";
-    if (typeof s !== "string")
-        return String(s ?? "");
-    const t = s.trim();
-    if (!t || t === "null" || t === "undefined" || t === '""' || t === "''" || looksLikePlaceholder(t))
-        return "";
-    return t;
+    "space": "science", "fantasy": "fiction", "mystery": "fiction", "coding": "education", "programming": "education"
 };
 function normTag(s) {
     return String(s ?? "")
@@ -204,32 +397,27 @@ function mapAgeToGroup(n) {
         return "9-12";
     return "13-15";
 }
-/** Extract “books/videos … on|about …” and “<topic> books/videos” */
-function extractExplicitTopic(utter) {
-    const u = (utter || "").toLowerCase().trim();
-    if (!u)
-        return { kind: null, term: null };
-    // “books/videos … on|about …”
-    const pat1 = /(book|books|video|videos)\b[^]*?\b(?:on|about|regarding|around|for)\s+([^].*)$/i;
-    const m1 = u.match(pat1);
-    if (m1) {
-        const kind = m1[1].includes("video") ? "video" : "book";
-        let term = (m1[2] || "").replace(/\b(for|to|please|pls)\b.*$/i, "").trim();
-        term = term.replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, "");
-        if (term)
-            return { kind, term };
-    }
-    // “<topic> books/videos”
-    const m2 = /(.*)\s+(videos?|books?)$/i.exec(u);
-    if (m2) {
-        const kind = m2[2].startsWith("video") ? "video" : "book";
-        const term = m2[1].trim().replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, "");
-        if (term && !GENRE_ALIASES[term])
-            return { kind, term };
-    }
-    return { kind: null, term: null };
+function isTruthy(x) {
+    if (typeof x === "boolean")
+        return x;
+    if (typeof x === "string")
+        return /^(1|true|yes|on)$/i.test(x.trim());
+    if (typeof x === "number")
+        return x !== 0;
+    return false;
 }
-/* ---------- strict topic filtering helpers ---------- */
+function getSearchMode(params) {
+    const raw = (params?.mode ?? params?.Mode ?? params?.search_mode ?? params?.searchMode ?? "")
+        .toString().toLowerCase().trim();
+    const personalizedFlag = isTruthy(params?.personalize) || isTruthy(params?.personalised) ||
+        isTruthy(params?.personalized) || isTruthy(params?.use_profile);
+    if (raw === "personalized" || personalizedFlag)
+        return "personalized";
+    if (["ann", "vector", "unbiased"].includes(raw))
+        return "ann";
+    return "ann";
+}
+/* ----------------------- topic matching (strict filter) -------------------- */
 function topicVariants(raw) {
     const t = (raw || "").trim().toLowerCase();
     if (!t)
@@ -244,26 +432,13 @@ function topicVariants(raw) {
     }
     return Array.from(out);
 }
-function containsAny(hay, needles) {
-    if (!hay)
-        return false;
-    const lc = hay.toLowerCase();
-    return needles.some(n => lc.includes(n));
-}
-function bookMatchesTopic(raw, topic) {
-    const vars = topicVariants(topic);
-    const title = pickTitle(raw);
-    const authors = pickAuthorsArray(raw).join(", ");
-    const desc = pickDescription(raw);
-    return containsAny(title, vars) || containsAny(authors, vars) || containsAny(desc, vars);
-}
-function videoMatchesTopic(raw, topic) {
-    const vars = topicVariants(topic);
-    const title = pickTitle(raw);
-    const desc = raw?.description || raw?.snippet?.description || "";
-    return containsAny(title, vars) || containsAny(desc, vars);
-}
-/* ---------- genre → queries ---------- */
+const containsAny = (hay, needles = []) => !!hay && needles.some(n => hay.toLowerCase().includes(n));
+const bookMatchesTopic = (raw, topic) => containsAny(pickTitle(raw), topicVariants(topic)) ||
+    containsAny(pickAuthorsArray(raw).join(", "), topicVariants(topic)) ||
+    containsAny(pickDescription(raw), topicVariants(topic));
+const videoMatchesTopic = (raw, topic) => containsAny(pickTitle(raw), topicVariants(topic)) ||
+    containsAny(raw?.description || raw?.snippet?.description || "", topicVariants(topic));
+/* ------------------------------ queries/maps ------------------------------- */
 function bookQueryFor(canon) {
     switch (canon) {
         case "all": return { term: "children books", juvenile: true };
@@ -293,33 +468,11 @@ function videoQueryFor(canon) {
         default: return String(canon || "kids");
     }
 }
-/* ---- display simplifier ---- */
-function simplifyItem(kind, raw) {
-    return {
-        id: kind === "book"
-            ? (raw?.id || raw?.volumeId || raw?.volumeInfo?.industryIdentifiers?.[0]?.identifier || null)
-            : (raw?.id?.videoId || raw?.videoId || null),
-        title: pickTitle(raw) || "Untitled",
-        thumb: pickThumb(raw),
-    };
-}
-/* ---- de-dupe helper ---- */
-function uniqNew(items, seen, kind) {
-    const out = [];
-    for (const it of items) {
-        const id = kind === "book" ? idForBook(it) : idForVideo(it);
-        if (!id || seen.has(id))
-            continue;
-        seen.add(id);
-        out.push(it);
-    }
-    return out;
-}
-/* ---- category/search fetchers ---- */
+/* ------------------------------- fetchers ---------------------------------- */
 async function fetchBooksByCategory(canon, opts) {
     if (API_BASE) {
         try {
-            const u = new URL(`${API_BASE.replace(/\/+$/, "")}/api/books`);
+            const u = new URL(`${API_BASE}/api/books`);
             const { term } = bookQueryFor(canon);
             u.searchParams.set("q", term);
             u.searchParams.set("query", term);
@@ -330,7 +483,6 @@ async function fetchBooksByCategory(canon, opts) {
                 u.searchParams.set("ageGroup", String(opts.ageGroup));
             if (opts.lang)
                 u.searchParams.set("lang", String(opts.lang));
-            // (keep offset/limit path for category browse)
             u.searchParams.set("limit", "6");
             u.searchParams.set("offset", String(opts.startIndex));
             u.searchParams.set("debug", "1");
@@ -338,7 +490,7 @@ async function fetchBooksByCategory(canon, opts) {
             return { items: pickItems(data), usedUrl: u.toString(), source: "app" };
         }
         catch (e) {
-            logger.warn("App /api/books (category page) failed; fallback to Google Books", { e: String(e) });
+            logger.warn("App /api/books failed; fallback to Google Books", { e: String(e) });
         }
     }
     const { term, juvenile } = bookQueryFor(canon);
@@ -353,11 +505,10 @@ async function fetchBooksByCategory(canon, opts) {
     const data = await getJSON(g.toString());
     return { items: Array.isArray(data?.items) ? data.items : [], usedUrl: g.toString(), source: "google_books" };
 }
-/** free-text books search (page/pageSize) */
 async function fetchBooksBySearch(term, opts) {
     const q = term.trim();
     if (API_BASE) {
-        const u = new URL(`${API_BASE.replace(/\/+$/, "")}/api/books`);
+        const u = new URL(`${API_BASE}/api/books`);
         u.searchParams.set("q", q);
         if (opts.lang)
             u.searchParams.set("lang", String(opts.lang));
@@ -386,7 +537,7 @@ async function fetchVideosByTopic(topic, opts) {
     const q = opts.freeQuery ? String(opts.freeQuery) : videoQueryFor(topic);
     if (API_BASE) {
         try {
-            const u = new URL(`${API_BASE.replace(/\/+$/, "")}/api/videos`);
+            const u = new URL(`${API_BASE}/api/videos`);
             u.searchParams.set("q", q);
             u.searchParams.set("query", q);
             u.searchParams.set("topic", String(opts.freeQuery ? (opts.freeQuery || topic) : topic));
@@ -398,15 +549,10 @@ async function fetchVideosByTopic(topic, opts) {
             if (opts.pageToken)
                 u.searchParams.set("pageToken", String(opts.pageToken));
             const data = await getJSON(u.toString());
-            return {
-                items: pickItems(data),
-                usedUrl: u.toString(),
-                source: "app",
-                nextPageToken: data?.nextPageToken || null
-            };
+            return { items: pickItems(data), usedUrl: u.toString(), source: "app", nextPageToken: data?.nextPageToken || null };
         }
         catch (e) {
-            logger.warn("App /api/videos (category page) failed; fallback to YouTube", { e: String(e) });
+            logger.warn("App /api/videos failed; fallback to YouTube", { e: String(e) });
         }
     }
     const y = new URL("https://www.googleapis.com/youtube/v3/search");
@@ -428,415 +574,1269 @@ async function fetchVideosByTopic(topic, opts) {
         nextPageToken: data?.nextPageToken || null
     };
 }
-/* unified reply (Dialogflow CX) */
+/* ------------------------------ CX reply shim ------------------------------ */
 function reply(res, text, extras = {}, payload) {
     try {
         res.setHeader?.("Content-Type", "application/json");
     }
     catch { }
+    // --- persist per user+session ---
+    try {
+        // NOTE: set earlier in cxWebhook before calling reply()
+        const sessionId = globalThis.__kidflix_sessionId || "default";
+        const u = globalThis.__kidflix_userKey || "anon:device";
+        const resolvedUserId = typeof extras.userId === "string" && extras.userId
+            ? extras.userId
+            : globalThis.__kidflix_userId || undefined;
+        // choose what we store (keep it small)
+        const toStore = {
+            userId: resolvedUserId,
+            last_list: extras.last_list ?? undefined,
+            last_algo: extras.last_algo ?? undefined,
+            seen_ids: Array.isArray(extras.seen_ids) ? extras.seen_ids.slice(-200) : undefined,
+            seen_video_ids: Array.isArray(extras.seen_video_ids) ? extras.seen_video_ids.slice(-200) : undefined,
+            next_offset: typeof extras.next_offset === "number" ? extras.next_offset : undefined,
+            last_video_page_token: extras.last_video_page_token ?? undefined,
+            category: extras.category ?? undefined,
+            topic: extras.topic ?? undefined,
+            genre: extras.genre ?? undefined,
+        };
+        // drop undefined keys
+        const pruned = Object.fromEntries(Object.entries(toStore).filter(([, v]) => v !== undefined));
+        // fire & forget
+        saveThreadState(u, sessionId, pruned).catch(() => { });
+    }
+    catch { }
     const messages = [{ text: { text: [text] } }];
     if (payload)
         messages.push({ payload });
-    res.status(200).json({ fulfillment_response: { messages }, sessionInfo: { parameters: { ...extras } } });
+    res.status(200).json({
+        fulfillment_response: { messages },
+        sessionInfo: { parameters: { ...extras } }
+    });
 }
+/* --------------------------------- copy ----------------------------------- */
 const WELCOME_LINE = `Hi! I’m Kidflix Assistant 👋. I can help to recommend books or videos for kids. ` +
     `Would you like to start with Books or Videos?`;
 const PROMPT_BOOKS = `Which book category are you after? (Fiction, Non Fiction, Education, Children’s Literature, ` +
     `Picture/Board/Early, Middle Grade, Poetry & Humor, Biography, Young Adult)`;
 const PROMPT_VIDEOS = `What kind of videos are you looking for? (Stories, Songs & Rhymes, Learning, Science, Math, Animals, Art & Crafts)`;
-/* =================== WEBHOOK: cxWebhook =================== */
+/* ----------------------------- utterance pickup ---------------------------- */
+function extractUtterance(body, params) {
+    const cand = [
+        params?.lastUserText,
+        body?.text,
+        body?.queryResult?.queryText,
+        body?.queryResult?.transcript,
+        body?.transcript,
+        body?.sessionInfo?.parameters?.q,
+        body?.sessionInfo?.parameters?.query,
+        body?.sessionInfo?.parameters?.free_query,
+        params?.q, params?.query, params?.free_query
+    ].map(clean).filter(Boolean);
+    return String(cand[0] || "");
+}
+function extractExplicitTopic(utter) {
+    const u0 = (utter || "").trim();
+    if (!u0)
+        return { kind: null, term: null };
+    const u = u0.toLowerCase();
+    // Pattern A: "<topic> books/videos"
+    const mA = u.match(/^([\p{L}\p{N}\s\-'"&]+?)\s+(books?|videos?)$/u);
+    if (mA) {
+        const kind = mA[2].startsWith("video") ? "video" : "book";
+        const term = normalizeForIntent(mA[1] || "").replace(/\b(books?|videos?)\b/g, "").trim();
+        return { kind, term: term || null };
+    }
+    // Pattern B: "books/videos (on|about|for) <topic>"
+    const mB = u.match(/\b(books?|videos?)\b.*?\b(on|about|regarding|around|for)\s+([\p{L}\p{N}\s\-'"&]+)$/u);
+    if (mB) {
+        const kind = mB[1].startsWith("video") ? "video" : "book";
+        const term = normalizeForIntent(mB[3] || "").replace(/\b(books?|videos?)\b/g, "").trim();
+        return { kind, term: term || null };
+    }
+    // Pattern C: "books/videos by/from <author>"
+    const mC = u.match(/\b(books?|videos?)\b\s+(by|from)\s+([\p{L}\p{N}\s\.\-'"&]+)$/u);
+    if (mC) {
+        const kind = mC[1].startsWith("video") ? "video" : "book";
+        const author = mC[3].trim();
+        return { kind, term: `inauthor:"${author}"`, author };
+    }
+    // Pattern D: lone author-ish input → let resolver probe author vs title
+    const tokens = u.split(/\s+/).filter(Boolean);
+    if (tokens.length >= 2 && tokens.length <= 5) {
+        return { kind: null, term: u0 };
+    }
+    return { kind: null, term: null };
+}
+const addForKids = (s) => (/\bfor\s+kids\b/i.test(s) ? s : `${s} for kids`);
+/* ------------------------------- webhook ----------------------------------- */
 exports.cxWebhook = (0, https_1.onRequest)({ region: "asia-southeast1", memory: "512MiB", timeoutSeconds: 120 }, async (req, res) => {
     const rawTag = req.body?.fulfillmentInfo?.tag ?? "";
     const tagKey = normTag(rawTag);
-    logger.info("TAG_DEBUG", { rawTag, tagKey, bodyHasFulfillmentInfo: !!req.body?.fulfillmentInfo });
-    const params = req.body?.sessionInfo?.parameters || {};
-    const rawUtterance = clean(req.body?.text || req.body?.queryResult?.queryText || "");
+    const body = req.body || {};
+    const intentName = body?.intentInfo?.displayName ?? "";
+    let params = body?.sessionInfo?.parameters || {};
+    // session & user key
+    const sessionId = (typeof body?.sessionInfo?.session === "string" && body.sessionInfo.session) || "default";
+    const userKey = currentUserId(req, params);
+    // make them available to reply()
+    globalThis.__kidflix_sessionId = sessionId;
+    globalThis.__kidflix_userKey = userKey;
+    // merge persisted → then request params (request overrides)
+    try {
+        const persisted = await loadThreadState(userKey, sessionId);
+        params = { ...(persisted || {}), ...(params || {}) };
+    }
+    catch (e) {
+        logger.warn("STATE_LOAD_ERR", String(e));
+    }
+    // pick up utterance robustly
+    const rawUtterance = extractUtterance(body, params);
+    logger.info("TRACE_UTTER", { rawTag, tagKey, intentName, rawUtterance });
+    // // mode & personalization
+    // const mode: SearchMode = getSearchMode(params);
+    // const userId: string | undefined = typeof params.userId === "string" ? params.userId : undefined;
+    // const canPersonalize = !!userId;
+    // const preferPersonal = mode === "personalized" && canPersonalize;
+    // mode & personalization
+    const mode = getSearchMode(params);
+    // accept user id from either params or header
+    const headerUid = req.headers["x-user-id"]?.trim() || "";
+    const paramUid = (typeof params.userId === "string" ? params.userId : "").trim();
+    const userId = (paramUid || headerUid) || undefined;
+    // make it visible to reply()
+    globalThis.__kidflix_userId = userId || null;
+    // write it back so downstream logic (and next turns) see it
+    if (userId && !params.userId)
+        params.userId = userId;
+    const canPersonalize = !!userId;
+    const preferPersonal = mode === "personalized" && canPersonalize;
+    // genres/topic from parameters or explicit text
     const rawBook = clean(params.genre);
     const rawVideo = clean(params.genre_video);
+    // const explicit = extractExplicitTopic(rawUtterance);
+    // const bookCanon = explicit.kind === "book" ? "" : normGenre(rawBook);
+    // const videoCanon = explicit.kind === "video" ? "" : normGenre(rawVideo);
+    // const freeBookQuery = explicit.kind === "book" ? explicit.term || "" : "";
+    // const freeVideoQuery = explicit.kind === "video" && explicit.term ? addForKids(explicit.term) : "";
     const explicit = extractExplicitTopic(rawUtterance);
-    const bookCanon = explicit.kind === "book" ? "" : normGenre(rawBook);
+    // If user typed "<genre> books", treat it as a category (fiction, nonfiction, education, etc.)
+    const explicitGenreCanon = (explicit.kind === "book" && explicit.term && isKnownGenreTerm(explicit.term))
+        ? normGenre(explicit.term)
+        : "";
+    // Keep genre in bookCanon and blank the free query when we recognized a genre.
+    // Otherwise fall back to the previous logic.
+    const bookCanon = explicitGenreCanon || (explicit.kind === "book" ? "" : normGenre(rawBook));
     const videoCanon = explicit.kind === "video" ? "" : normGenre(rawVideo);
-    const freeBookQuery = explicit.kind === "book" ? explicit.term : "";
-    const freeVideoQuery = explicit.kind === "video" ? (explicit.term ? `${explicit.term} for kids` : "") : "";
+    const freeBookQuery = explicitGenreCanon ? "" : (explicit.kind === "book" ? (explicit.term || "") : "");
+    const freeVideoQuery = (explicit.kind === "video" && explicit.term) ? addForKids(explicit.term) : "";
+    // --- Robust generic intent gating
+    const gen = isGenericAsk(rawUtterance);
+    // Effective queries that decide routing below
+    let effFreeBookQuery = freeBookQuery;
+    let effFreeVideoQuery = freeVideoQuery;
+    // If the user said “books/videos” without a real topic → force category prompts
+    if (gen.books && !effFreeBookQuery && !bookCanon)
+        effFreeBookQuery = "";
+    if (gen.videos && !effFreeVideoQuery && !videoCanon)
+        effFreeVideoQuery = "";
+    // Also guard ANN from low-info text like: “recommend books”, “show videos”
+    const annEligibleSeed = normalizeForIntent(effFreeBookQuery || effFreeVideoQuery || rawUtterance);
+    const blockAnn = isLowInfo(annEligibleSeed);
+    // Keep a clear, kids-biased free video term when user typed plain topic words
+    if (effFreeVideoQuery)
+        effFreeVideoQuery = ensureForKids(effFreeVideoQuery);
+    // age / lang
     const rawAge = params.age ?? params.child_age ?? params.kid_age ?? params.number ?? "";
-    const age = rawAge;
+    const age = Number.isFinite(Number(rawAge)) ? Number(rawAge) : undefined;
     const ageGroup = params.age_group || mapAgeToGroup(rawAge);
     const lang = String(params.language ?? "en");
+    /* ----------- safety & restrictions (runs whenever userId or text) ----------- */
     try {
-        const isBooks = tagKey === "findbooks" || tagKey === "books" || tagKey === "book";
-        const isVideos = tagKey === "findvideos" || tagKey === "videos" || tagKey === "video";
-        if (!isBooks && !isVideos && tagKey !== "more_like_this") {
-            reply(res, WELCOME_LINE);
-            return;
-        }
-        /* -------- BOOKS (first page) -------- */
-        if (isBooks) {
-            if (!bookCanon && !freeBookQuery) {
-                reply(res, PROMPT_BOOKS);
+        if (rawUtterance) {
+            let role = "child";
+            let restrictions = [];
+            if (userId) {
+                const userSnap = await db.collection("users").doc(userId).get();
+                role = userSnap.get("role") || "child";
+                restrictions = userSnap.get("restrictions") || [];
+            }
+            const hits = (0, restrictions_1.findRestrictedTerms)(rawUtterance, restrictions);
+            logger.info("GUARD_CHECK", {
+                userId: userId || null,
+                role, restrictionCount: restrictions.length,
+                sampleText: rawUtterance.slice(0, 60),
+                sampleHits: hits.slice(0, 3),
+            });
+            if (role === "child" && hits.length) {
+                if (userId) {
+                    await db.collection("safety_logs").add({
+                        userId, hits, ts: new Date(), messagePreview: rawUtterance.slice(0, 160),
+                    });
+                }
+                reply(res, "Hey there! I can’t help with that topic. Want to explore fun science books, animal stories, or math videos instead? 🐼🚀📚", { algo_used: "guard_block" });
                 return;
             }
-            let items = [];
+        }
+    }
+    catch (e) {
+        logger.warn("moderation guard error", String(e));
+        // fail-open
+    }
+    // convenience: kind from intent
+    const forcedType = /book/i.test(intentName) || /book/i.test(tagKey) ? "book" :
+        (/video/i.test(intentName) || /video/i.test(tagKey) ? "video" : undefined);
+    // Decide whether to try ANN first:
+    const freeQuery = clean(params?.q || params?.query || params?.free_query || params?.book_query || params?.video_query || rawUtterance);
+    // Build a seed query + desired type from context
+    function buildSeed(freeQuery, forcedType, explicit, rawBook, bookCanon, rawVideo, videoCanon, rawUtterance) {
+        const desiredType = forcedType ?? (explicit.kind ?? null);
+        // Prefer free text; else explicit term; else chosen category/topic
+        let seed = freeQuery || explicit.term || "";
+        let categoryOrTopic = "";
+        if (!seed) {
+            if (desiredType === "book") {
+                seed = rawBook || bookCanon || "";
+                categoryOrTopic = bookCanon || rawBook || "";
+            }
+            else if (desiredType === "video") {
+                seed = rawVideo || videoCanon || "";
+                categoryOrTopic = videoCanon || rawVideo || "";
+            }
+        }
+        if (!seed) {
+            seed = rawBook || rawVideo || bookCanon || videoCanon || "";
+            categoryOrTopic = bookCanon || videoCanon || rawBook || rawVideo || "";
+        }
+        if (!seed)
+            seed = rawUtterance || "kids reading and learning";
+        // If the seed itself is a known book genre, interpret it as the category
+        if (!categoryOrTopic && desiredType === "book" && isKnownGenreTerm(seed)) {
+            categoryOrTopic = normGenre(seed);
+        }
+        return { seed, desiredType, categoryOrTopic };
+    }
+    // --- Guard: personalized requested but off
+    if (mode === "personalized" && !canPersonalize) {
+        reply(res, "Personalized recommendations are currently disabled. Please sign in and turn on Personalization in Settings to get picks tailored to you.", { algo_used: "personalization_off", mode });
+        return;
+    }
+    // --- Canonicalize author (used by author flow)
+    async function resolveAuthorCanonical(raw, lang) {
+        try {
+            const g = new URL("https://www.googleapis.com/books/v1/volumes");
+            g.searchParams.set("q", `inauthor:${JSON.stringify(raw)}`);
+            g.searchParams.set("maxResults", "5");
+            if (lang)
+                g.searchParams.set("langRestrict", String(lang));
+            if (process.env.BOOKS_API_KEY)
+                g.searchParams.set("key", process.env.BOOKS_API_KEY);
+            const data = await getJSON(g.toString());
+            const items = Array.isArray(data?.items) ? data.items : [];
+            for (const it of items) {
+                const authors = pickAuthorsArray(it);
+                if (authors.length)
+                    return authors[0];
+            }
+        }
+        catch (e) {
+            logger.warn("resolveAuthorCanonical error", String(e));
+        }
+        return null;
+    }
+    // --- PERSONALIZER helper
+    async function tryPersonalizer(seedQuery, desiredType, categoryOrTopic) {
+        if (!canPersonalize)
+            return null;
+        try {
+            const seenIds = new Set([
+                ...(Array.isArray(params?.seen_ids) ? params.seen_ids.map(String) : []),
+                ...(Array.isArray(params?.seen_video_ids) ? params.seen_video_ids.map(String) : []),
+            ]);
+            const enrichedQuery = [seedQuery, categoryOrTopic].filter(Boolean).join(" ").trim();
+            const requestHash = hashKey(JSON.stringify({
+                userId,
+                q: enrichedQuery || seedQuery || "",
+                type: desiredType || undefined,
+                ctx: categoryOrTopic || "",
+            }));
+            const sessionIdLocal = params.session_id ||
+                (typeof req.body?.sessionInfo?.session === "string" ? req.body.sessionInfo.session : undefined);
+            const r = await (0, undici_1.fetch)(RECOMMENDER_URL, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                    userId,
+                    query: enrichedQuery || seedQuery || "",
+                    type: desiredType || undefined,
+                    age,
+                    language: lang,
+                    limit: 12,
+                    excludeIds: Array.from(seenIds),
+                    topic: categoryOrTopic || undefined,
+                    genre: categoryOrTopic || undefined,
+                    sessionId: sessionIdLocal,
+                    requestHash,
+                }),
+            });
+            if (!r.ok)
+                return null;
+            const j = await r.json();
+            if (j?.mode === "blocked") {
+                reply(res, j?.reply || "I can’t help with that topic. Try animals, space, or math instead!");
+                return "DONE";
+            }
+            const all = Array.isArray(j?.items) ? j.items : [];
+            if (!all.length)
+                return null;
+            const listKind = all[0]?.type === "video" ? "video" :
+                all[0]?.type === "book" ? "book" :
+                    (desiredType ?? "book");
+            const topicText = (categoryOrTopic || seedQuery || (listKind === "book" ? "books" : "videos")).trim();
+            const items = all.slice(0, 5);
+            const numbered = items
+                .map((it, i) => `${i + 1}. ${it.title} (${it.type === "video" ? "video" : "book"})`)
+                .join("\n");
+            const cards = items.map((it) => {
+                const authorsArr = Array.isArray(it.authors) ? it.authors : [];
+                const author = authorsArr[0] || "";
+                const authorCount = String(authorsArr.length || 0);
+                return makeInfoCard(it.title, authorsArr.length ? authorsArr.join(", ") : null, it.thumb || null, buildPreviewLink(it.type === "video" ? "video" : "book", {
+                    id: it.id,
+                    title: it.title,
+                    image: it.thumb || "",
+                    link: it.link || "",
+                    author,
+                    authors: authorsArr.join(", "),
+                    authorCount,
+                    category: listKind === "book" ? (categoryOrTopic || "") : undefined,
+                    topic: listKind === "video" ? (categoryOrTopic || "") : undefined,
+                    source: "recommender",
+                }));
+            });
+            const remembered = {
+                kind: listKind,
+                seedTitle: items[0]?.title || "",
+                items: items.map((it) => ({ id: it.id, title: it.title, thumb: it.thumb || null, type: it.type })),
+                ...(listKind === "book" ? { category: categoryOrTopic || "" } : { topic: categoryOrTopic || "" }),
+            };
+            reply(res, `Here are some personalized recommendations for ${listKind === "book" ? "books" : "videos"} on "${topicText}" because you like similar ${listKind === "book" ? "books" : "videos"}.\n\n${numbered}`, { algo_used: "recommender", last_algo: "recommender", mode, last_list: remembered }, { richContent: [cards.length ? [...cards] : [], [{ type: "chips", options: [{ text: "Show more" }] }]] });
+            return "DONE";
+        }
+        catch (e) {
+            logger.warn("recommender error", String(e));
+            return null;
+        }
+    }
+    // --- ANN helper (with global author extractor usage)
+    async function tryANN(query, opts) {
+        try {
+            const limit = 12;
+            const biasSuffix = opts.personalize ? " for kids" : "";
+            const q1 = (query || "").trim();
+            const q2 = (q1 + biasSuffix).trim();
+            logger.info("DECISION_SEED", { preferPersonal, seed: q1, desiredType, categoryOrTopic: opts.contextTag || "", tagKey });
+            logger.info("ANN_START", { q1, q2, forcedType: opts.forcedType, personalize: opts.personalize, contextTag: opts.contextTag });
+            let rows = await annNearest(q1, limit, opts.forcedType || undefined);
+            logger.info("ANN_AFTER_SQL", { count: rows?.length ?? 0 });
+            if (!rows || rows.length === 0) {
+                logger.info("ANN_RETRY", { step: "no-results → drop type filter", q: q1 });
+                rows = await annNearest(q1, limit, undefined);
+            }
+            if (!rows || rows.length === 0) {
+                logger.info("ANN_RETRY", { step: "no-results → add kids bias", q: q2, forcedType: opts.forcedType });
+                rows = await annNearest(q2, limit, opts.forcedType || undefined);
+            }
+            if (!rows || rows.length === 0) {
+                logger.warn("ANN_SQL_EMPTY_TRY_HTTP");
+                try {
+                    rows = await annNearestHttp(q1, limit, opts.forcedType || undefined);
+                    logger.info("ANN_AFTER_HTTP", { count: rows?.length ?? 0 });
+                }
+                catch (e) {
+                    logger.warn("ANN_HTTP_ERROR", String(e));
+                }
+            }
+            if (!rows || rows.length === 0) {
+                logger.info("ANN_GIVE_UP");
+                return null;
+            }
+            // --- (3) Low-confidence guard on base ANN similarity
+            const baseSim = (r) => typeof r.score === "number"
+                ? r.score
+                : (typeof r.dist === "number" ? (1 - r.dist) : 0);
+            let bestBaseSim = 0;
+            for (const r of rows) {
+                const s = baseSim(r);
+                if (s > bestBaseSim)
+                    bestBaseSim = s;
+            }
+            if (bestBaseSim < 0.38) {
+                logger.info("ANN_CONF_LOW → fallback to category/search", { bestBaseSim });
+                return null;
+            }
+            // --- (2) Hybrid re-ranking: favor exact/near author & title matches
+            function softIncludes(hay, needle) {
+                return !!(hay && needle) && hay.toLowerCase().includes(needle.toLowerCase());
+            }
+            const qAuthor = extractAuthorCandidate(q1);
+            const titleText = q1; // original query text for title contains
+            const authorSignal = (rowAuthors) => {
+                if (!qAuthor || !Array.isArray(rowAuthors) || rowAuthors.length === 0)
+                    return 0;
+                const lower = qAuthor.toLowerCase();
+                if (rowAuthors.some(a => a && a.toLowerCase() === lower))
+                    return 1.0; // exact author
+                if (rowAuthors.some(a => softIncludes(a, qAuthor)))
+                    return 0.6; // partial author
+                return 0;
+            };
+            const titleSignal = (title) => softIncludes(title || "", titleText) ? 0.5 : 0;
+            // Blend: 50% ANN similarity + 50% textual boost
+            rows = rows
+                .map((r) => {
+                const sim = baseSim(r);
+                const aBoost = authorSignal(r.authors);
+                const tBoost = titleSignal(r.title);
+                const final = 0.50 * sim + 0.50 * Math.max(aBoost, tBoost);
+                return { ...r, _final: final };
+            })
+                .sort((a, b) => (b._final ?? 0) - (a._final ?? 0));
+            const minAcceptable = 0.35;
+            if (!rows.some((r) => (r._final ?? 0) >= minAcceptable)) {
+                logger.info("ANN_AUTHOR_NO_GOOD_CANDIDATES → fallback");
+                return null;
+            }
+            const items = rows.slice(0, 5).map((r) => {
+                const authorsArr = Array.isArray(r.authors) ? r.authors : (r.authors ? [String(r.authors)] : []);
+                return { ...r, authors: authorsArr };
+            });
+            const cards = items.map((r) => {
+                const subtitle = r.authors.length ? r.authors.join(", ") : null;
+                const kind = r.kind === "video" ? "video" : "book";
+                const author = r.authors[0] || "";
+                const authorCount = String(r.authors.length || 0);
+                return makeInfoCard(r.title, subtitle, r.thumb || null, buildPreviewLink(kind, {
+                    id: r.id,
+                    title: r.title,
+                    image: r.thumb || "",
+                    link: r.link || "",
+                    author,
+                    authors: r.authors.join(", "),
+                    authorCount,
+                    category: kind === "book" ? (opts.contextTag || "") : undefined,
+                    topic: kind === "video" ? (opts.contextTag || "") : undefined,
+                    description: (r.description || "").slice(0, 500),
+                    snippet: (r.description || "").slice(0, 500),
+                    source: "ann",
+                }));
+            });
+            const annKind = items[0].kind === "video" ? "video" : "book";
+            const remembered = {
+                kind: annKind,
+                seedTitle: items[0].title || "",
+                items: items.map((r) => ({ id: r.id, title: r.title, thumb: r.thumb || null })),
+            };
+            if (annKind === "book")
+                remembered.category = opts.contextTag || "";
+            if (annKind === "video")
+                remembered.topic = opts.contextTag || "";
+            const topicText = (opts.contextTag || q1 || (annKind === "book" ? "books" : "videos")).trim();
+            const lastQueryUrl = `ANN(local/sql+fallback):{"q":${JSON.stringify(q1)},"type":"${opts.forcedType ?? "auto"}"}`;
+            const numbered = items.map((r, i) => `${i + 1}. ${r.title} (${r.kind})`).join("\n");
+            reply(res, `Here are some recommendation picks for ${annKind === "book" ? "books" : "videos"} on "${topicText}".\n\n${numbered}`, { algo_used: "ann", last_algo: "ann", mode: opts.mode, last_list: remembered, lastQueryUrl }, { richContent: [cards.length ? [...cards] : [], [{ type: "chips", options: [{ text: "Show more" }] }]] });
+            return "DONE";
+        }
+        catch (e) {
+            logger.warn("ANN failed", String(e));
+            return null;
+        }
+    }
+    const looksLikeAuthorAsk = (u) => /\bbooks?\s+(?:by|from)\s+/.test(u.toLowerCase().trim())
+        || /\b[a-z][a-z'.-]+\s+[a-z'.-]+(?:\s+[a-z'.-]+)?\s+books?\b/i.test(u);
+    // ---- NEW AUTHOR FLOW (place before generic routing) ----
+    if (tagKey === "bookbyauthor" || intentName === "BookByAuthor" || looksLikeAuthorAsk(rawUtterance)) {
+        const rawAuthor = readAuthorParam(params, rawUtterance) || extractAuthorCandidate(rawUtterance);
+        if (!rawAuthor) {
+            reply(res, "Which author are you looking for? You can say things like “books by Roald Dahl” or “J K Rowling books”.");
+            return;
+        }
+        const canonAuthor = await resolveAuthorCanonical(rawAuthor, lang) || rawAuthor;
+        // 1) ANN with strict author filter
+        const annRows = await annNearest(`${canonAuthor} books`, 24, "book");
+        const filtered = (annRows || []).filter(r => {
+            const arr = Array.isArray(r.authors) ? r.authors.map((a) => String(a).toLowerCase()) : [];
+            const target = canonAuthor.toLowerCase();
+            return arr.includes(target) || arr.some((a) => a.includes(target));
+        });
+        const ranked = filtered
+            .map((r) => {
+            const sim = typeof r.score === "number" ? r.score : (typeof r.dist === "number" ? (1 - r.dist) : 0);
+            const aBoost = 1.0; // already filtered by author; strong boost
+            const tBoost = (r.title || "").toLowerCase().includes(canonAuthor.toLowerCase()) ? 0.2 : 0;
+            return { ...r, _final: 0.5 * sim + 0.5 * Math.max(aBoost, tBoost) };
+        })
+            .sort((a, b) => (b._final ?? 0) - (a._final ?? 0));
+        if (ranked.length >= 3) {
+            const items = ranked.slice(0, 5).map((r) => ({ ...r, authors: Array.isArray(r.authors) ? r.authors : (r.authors ? [String(r.authors)] : []) }));
+            const numbered = items.map((r, i) => `${i + 1}. ${r.title} (book)`).join("\n");
+            const cards = items.map((r) => makeInfoCard(r.title, r.authors.length ? r.authors.join(", ") : null, r.thumb || null, buildPreviewLink("book", {
+                id: r.id, title: r.title, image: r.thumb || "", link: r.link || "",
+                author: r.authors[0] || "", authors: r.authors.join(", "), authorCount: String(r.authors.length || 0),
+                source: "ann", category: ""
+            })));
+            reply(res, `Here are some books by “${canonAuthor}”:\n\n${numbered}`, {
+                algo_used: "ann_author",
+                last_algo: "ann",
+                mode,
+                last_list: {
+                    kind: "book", category: "", seedTitle: items[0]?.title || "",
+                    items: items.map((x) => ({ id: x.id, title: x.title, thumb: x.thumb || null }))
+                }
+            }, { richContent: [cards.length ? [...cards] : [], [{ type: "chips", options: [{ text: "Show more" }] }]] });
+            return;
+        }
+        // 2) Fallback to Google Books inauthor: (RELAXED + post-filter for kids)
+        try {
+            const g = new URL("https://www.googleapis.com/books/v1/volumes");
+            // primary: just author (no 'subject:juvenile' hard filter)
+            g.searchParams.set("q", `inauthor:"${canonAuthor}"`);
+            g.searchParams.set("printType", "books");
+            g.searchParams.set("orderBy", "relevance");
+            if (lang)
+                g.searchParams.set("langRestrict", String(lang));
+            g.searchParams.set("maxResults", "20");
+            if (process.env.BOOKS_API_KEY)
+                g.searchParams.set("key", process.env.BOOKS_API_KEY);
+            const data = await getJSON(g.toString());
+            let all = Array.isArray(data?.items) ? data.items : [];
+            // soft child/YA filter from categories/snippets/titles
+            const isKid = (it) => {
+                const vi = it?.volumeInfo || {};
+                const cats = Array.isArray(vi.categories) ? vi.categories.join(" ") : String(vi.categories || "");
+                const title = String(vi.title || "");
+                const snip = String(it?.searchInfo?.textSnippet || vi.description || "");
+                const hay = `${cats} ${title} ${snip}`.toLowerCase();
+                return /\b(juvenile|children|child|kids?|young adult|ya|middle[-\s]?grade|picture\s*book|board\s*book|early\s*reader|chapter\s*book)\b/.test(hay);
+            };
+            let kid = all.filter(isKid);
+            // if the kid-filter is too aggressive, relax to all author results
+            if (kid.length < 3)
+                kid = all;
+            // still too few? try a second pass with a softer query variant
+            if (kid.length < 3 && canonAuthor.split(" ").length >= 2) {
+                const g2 = new URL("https://www.googleapis.com/books/v1/volumes");
+                g2.searchParams.set("q", `inauthor:${JSON.stringify(canonAuthor)} OR "${canonAuthor}"`);
+                g2.searchParams.set("printType", "books");
+                g2.searchParams.set("orderBy", "relevance");
+                if (lang)
+                    g2.searchParams.set("langRestrict", String(lang));
+                g2.searchParams.set("maxResults", "20");
+                if (process.env.BOOKS_API_KEY)
+                    g2.searchParams.set("key", process.env.BOOKS_API_KEY);
+                const data2 = await getJSON(g2.toString());
+                const all2 = Array.isArray(data2?.items) ? data2.items : [];
+                const kid2 = all2.filter(isKid);
+                if (kid2.length > kid.length)
+                    kid = kid2;
+                else if (!kid.length)
+                    kid = all2; // at least show something
+            }
+            const top = kid.slice(0, 5);
+            if (!top.length) {
+                reply(res, `I couldn’t find books by “${canonAuthor}”. Try another author?`);
+                return;
+            }
+            const numbered = top.map((it, i) => `${i + 1}. ${pickTitle(it) || "Untitled"}`).join("\n");
+            const cards = top.map((it) => {
+                const title = pickTitle(it) ?? "Untitled";
+                const authorsArr = pickAuthorsArray(it);
+                const img = pickThumb(it);
+                const desc = String(pickDescription(it)).slice(0, 500);
+                return makeInfoCard(title, authorsArr.length ? authorsArr.join(", ") : null, img, buildPreviewLink("book", {
+                    id: idForBook(it),
+                    title,
+                    image: img || "",
+                    link: pickLinkBook(it) || "",
+                    author: authorsArr[0] || "",
+                    authors: authorsArr.join(", "),
+                    authorCount: String(authorsArr.length || 0),
+                    description: desc,
+                    snippet: desc,
+                    category: "",
+                    source: "google_books"
+                }));
+            });
+            reply(res, `Here are some books by “${canonAuthor}”:\n\n${numbered}`, {
+                algo_used: "author_search",
+                last_algo: "author_search",
+                mode,
+                last_list: {
+                    kind: "book",
+                    category: "",
+                    seedTitle: top[0] ? (pickTitle(top[0]) || "") : "",
+                    items: top.map((it) => ({ id: idForBook(it), title: pickTitle(it) || "Untitled", thumb: pickThumb(it) }))
+                },
+                lastQueryUrl: "GoogleBooks:inauthor"
+            }, { richContent: [cards.length ? [...cards] : [], [{ type: "chips", options: [{ text: "Show more" }] }]] });
+            return;
+        }
+        catch (e) {
+            logger.warn("author inauthor fallback error", String(e));
+            reply(res, `I had trouble searching for books by “${canonAuthor}”. Try again or another author?`);
+            return;
+        }
+    }
+    // ----------------------- existing routing continues -----------------------
+    if (tagKey === "noop_guard" && !looksLikeAuthorAsk(rawUtterance)) {
+        reply(res, "I didn’t get that. Try asking for another topic (e.g., “fiction books”, “educational videos”).", { algo_used: "noop" });
+        return;
+    }
+    // MORE LIKE THIS
+    if (tagKey === "more_like_this") {
+        const p = params || {};
+        const last = p.last_list || {};
+        const lastAlgo = String(p.last_algo || p.algo_used || "").toLowerCase();
+        const kind = last.kind;
+        if (!kind) {
+            reply(res, "Do you want more books or more videos?", {}, {
+                richContent: [[{ type: "chips", options: [{ text: "Books" }, { text: "Videos" }] }]]
+            });
+            return;
+        }
+        // Build a clean exclude set
+        const excludeIds = [
+            ...(Array.isArray(p.seen_ids) ? p.seen_ids.map(String) : []),
+            ...(Array.isArray(p.seen_video_ids) ? p.seen_video_ids.map(String) : []),
+            ...(Array.isArray(last.items) ? last.items.map((x) => String(x?.id)).filter(Boolean) : []),
+        ];
+        const exclude = new Set(excludeIds);
+        // Prefer genre/topic → query → seedTitle
+        const baseLabel = (kind === "book" ? (last.category || p.category || "") : (last.topic || p.topic || "")) || "";
+        const enrichedQuery = [baseLabel, (p.query || ""), (last.seedTitle || "")].filter(Boolean).join(" ").trim();
+        // --- A) Personalizer branch
+        if (lastAlgo === "recommender") {
+            try {
+                const r = await (0, undici_1.fetch)(RECOMMENDER_URL, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({
+                        userId,
+                        query: enrichedQuery,
+                        type: kind,
+                        age: p.age || undefined,
+                        limit: 12,
+                        excludeIds: Array.from(exclude),
+                        topic: last.topic || undefined,
+                        genre: last.category || undefined,
+                    }),
+                });
+                if (r.ok) {
+                    const j = await r.json();
+                    const all = Array.isArray(j?.items) ? j.items : [];
+                    const items = all.filter((it) => it?.id && !exclude.has(String(it.id))).slice(0, 5);
+                    if (items.length) {
+                        const cards = items.map((it) => makeInfoCard(it.title, Array.isArray(it.authors) && it.authors.length ? it.authors.join(", ") : null, it.thumb || null, buildPreviewLink(it.type === "video" ? "video" : "book", {
+                            id: it.id,
+                            title: it.title,
+                            image: it.thumb || "",
+                            link: it.link || "",
+                            author: Array.isArray(it.authors) ? (it.authors[0] || "") : "",
+                            authors: Array.isArray(it.authors) ? it.authors.join(", ") : "",
+                            authorCount: String(Array.isArray(it.authors) ? it.authors.length : 0),
+                            category: kind === "book" ? (last.category || "") : undefined,
+                            topic: kind === "video" ? (last.topic || "") : undefined,
+                            source: "recommender",
+                        })));
+                        items.forEach((it) => exclude.add(String(it.id)));
+                        const remembered = {
+                            kind,
+                            seedTitle: items[0]?.title || last.seedTitle || "",
+                            items: items.map((it) => ({ id: it.id, title: it.title, thumb: it.thumb || null })),
+                            ...(kind === "book" ? { category: last.category || "" } : { topic: last.topic || "" })
+                        };
+                        const label = baseLabel || last.seedTitle || (kind === "book" ? "books" : "videos");
+                        const numbered = items.map((it, i) => `${i + 1}. ${it.title} (${it.type})`).join("\n");
+                        reply(res, `Here are more personalized picks related to "${label}":\n\n${numbered}`, {
+                            last_list: remembered,
+                            last_algo: "recommender",
+                            algo_used: "recommender_more",
+                            seen_ids: Array.from(exclude),
+                            seen_video_ids: Array.from(exclude),
+                            mode
+                        }, { richContent: [cards.length ? [...cards] : [], [{ type: "chips", options: [{ text: "Show more" }] }]] });
+                        return;
+                    }
+                }
+                else {
+                    logger.warn("recommender-more HTTP not ok", String(r.status));
+                }
+            }
+            catch (e) {
+                logger.warn("recommender-more error", String(e));
+            }
+        }
+        // --- B) ANN branch
+        if (lastAlgo === "ann") {
+            const baseQuery = enrichedQuery || "kids books and videos";
+            const ann = await annNearest(baseQuery, 12, kind);
+            const fresh = (ann || []).filter(x => x?.id && !exclude.has(String(x.id))).slice(0, 5);
+            if (fresh.length) {
+                const cards = fresh.map((r) => makeInfoCard(r.title, Array.isArray(r.authors) && r.authors.length ? r.authors.join(", ") : null, r.thumb || null, buildPreviewLink(r.kind, {
+                    id: r.id,
+                    title: r.title,
+                    image: r.thumb || "",
+                    link: r.link || "",
+                    author: Array.isArray(r.authors) ? (r.authors[0] || "") : "",
+                    authors: Array.isArray(r.authors) ? r.authors.join(", ") : "",
+                    authorCount: String(Array.isArray(r.authors) ? r.authors.length : 0),
+                    category: kind === "book" ? (last.category || "") : undefined,
+                    topic: kind === "video" ? (last.topic || "") : undefined,
+                    description: (r.description || "").slice(0, 500),
+                    snippet: (r.description || "").slice(0, 500),
+                    source: "ann",
+                })));
+                fresh.forEach((it) => exclude.add(String(it.id)));
+                const remembered = {
+                    kind,
+                    seedTitle: fresh[0]?.title || last.seedTitle || "",
+                    items: fresh.map((it) => ({ id: it.id, title: it.title, thumb: it.thumb || null })),
+                    ...(kind === "book" ? { category: last.category || "" } : { topic: last.topic || "" })
+                };
+                const label = baseLabel || last.seedTitle || (kind === "book" ? "books" : "videos");
+                const numbered = fresh.map((it, i) => `${i + 1}. ${it.title} (${kind})`).join("\n");
+                reply(res, `Here are more similar picks related to "${label}":\n\n${numbered}`, {
+                    last_list: remembered,
+                    last_algo: "ann",
+                    algo_used: "ann_more",
+                    seen_ids: Array.from(exclude),
+                    seen_video_ids: Array.from(exclude),
+                    mode
+                }, { richContent: [cards.length ? [...cards] : [], [{ type: "chips", options: [{ text: "Show more" }] }]] });
+                return;
+            }
+        }
+        // ---------- C) BOOKS pagination fallback ----------
+        if (kind === "book") {
+            const category = last.category || p.category;
+            if (!category) {
+                reply(res, "Which book category should I continue? (e.g., Fiction, Non-fiction)");
+                return;
+            }
+            let startIndex = Math.max(0, Number(p.next_offset) || 0);
+            const seen = new Set(Array.isArray(p.seen_ids) ? p.seen_ids : []);
+            const fresh = [];
             let usedUrl = "";
             let source = "app";
-            if (freeBookQuery) {
-                const first = await fetchBooksBySearch(freeBookQuery, { page: 1, pageSize: 12, lang });
-                items = first.items;
-                usedUrl = first.usedUrl;
-                source = first.source;
-                // strict filtering for the topic; fallback if too few
-                const filtered = items.filter((it) => bookMatchesTopic(it, freeBookQuery));
-                if (filtered.length >= 3)
-                    items = filtered;
+            for (let tries = 0; tries < 10 && fresh.length < 5; tries += 1) {
+                const page = await fetchBooksByCategory(String(category), { startIndex, lang: p.language, age: p.age, ageGroup: p.age_group });
+                const uniques = page.items.filter((it) => { const id = idForBook(it); return id && !seen.has(id); });
+                if (uniques.length > 0) {
+                    fresh.push(...uniques);
+                    usedUrl = page.usedUrl;
+                    source = page.source;
+                }
+                else if (page.source === "app") {
+                    const { term, juvenile } = bookQueryFor(String(category));
+                    const g = new URL("https://www.googleapis.com/books/v1/volumes");
+                    g.searchParams.set("q", `${term}${juvenile ? " subject:juvenile" : ""}`);
+                    if (p.language)
+                        g.searchParams.set("langRestrict", String(p.language));
+                    g.searchParams.set("maxResults", "6");
+                    g.searchParams.set("startIndex", String(startIndex));
+                    if (process.env.BOOKS_API_KEY)
+                        g.searchParams.set("key", process.env.BOOKS_API_KEY);
+                    const data = await getJSON(g.toString());
+                    const uniques2 = (Array.isArray(data?.items) ? data.items : []).filter((it) => {
+                        const id = idForBook(it);
+                        return id && !seen.has(id);
+                    });
+                    if (uniques2.length > 0) {
+                        fresh.push(...uniques2);
+                        usedUrl = g.toString();
+                        source = "google_books";
+                    }
+                }
+                else {
+                    usedUrl = page.usedUrl;
+                    source = page.source;
+                }
+                startIndex += 6;
             }
-            else {
-                const first = await fetchBooksByCategory(bookCanon, { startIndex: 0, lang, age, ageGroup });
-                items = first.items;
-                usedUrl = first.usedUrl;
-                source = first.source;
-            }
-            const display = freeBookQuery || rawBook || bookCanon || "books";
-            const topItems = items.slice(0, 5);
-            const top = topItems.map((it, i) => `${i + 1}. ${pickTitle(it) ?? "Untitled"}`).filter(Boolean);
-            const text = top.length
-                ? `Here are some book picks on "${display}":\n${top.join("\n")}`
-                : `I couldn't find books on "${display}". Try another topic or category?`;
+            const topItems = fresh.slice(0, 5);
+            const text = topItems.length
+                ? `Here are more similar picks related to "${category}":\n` +
+                    asNumbered(topItems.map((it) => ({ title: pickTitle(it) || "Untitled", type: "book" })), 5)
+                : `I couldn't find more results for "${category}". Try another category?`;
             const cards = topItems.map((it) => {
                 const title = pickTitle(it) ?? "Untitled";
-                const authorList = pickAuthorsArray(it);
-                const subtitle = authorList.length ? authorList.join(", ") : null;
+                const authorsArr = pickAuthorsArray(it);
+                const author = authorsArr[0] || "";
+                const authorCount = String(authorsArr.length || 0);
                 const img = pickThumb(it);
-                const desc = pickDescription(it);
+                const desc = String(pickDescription(it)).slice(0, 500);
                 const href = buildPreviewLink("book", {
                     id: idForBook(it),
                     title,
                     image: img || "",
                     link: pickLinkBook(it) || "",
-                    authors: authorList.join(", "),
-                    snippet: String(desc).slice(0, 500),
-                    category: String(freeBookQuery || bookCanon),
-                    age: age ? String(age) : "",
-                    source
+                    author,
+                    authorCount,
+                    authors: authorsArr.join(", "),
+                    description: desc,
+                    snippet: desc,
+                    category: String(category),
+                    source,
                 });
-                return makeInfoCard(title, subtitle, img, href);
+                return makeInfoCard(title, authorsArr.length ? authorsArr.join(", ") : null, img, href);
             });
-            const payload = { richContent: [cards.length ? [...cards] : [], [{ type: "chips", options: [{ text: "More like this" }, { text: "Recommend similar" }] }]] };
-            const seenBooks = new Set();
-            for (const it of topItems) {
-                const id = idForBook(it);
-                if (id)
-                    seenBooks.add(id);
-            }
+            topItems.forEach(it => { const id = idForBook(it); if (id)
+                seen.add(id); });
             const remembered = {
                 kind: "book",
-                category: String(freeBookQuery || bookCanon),
-                seedTitle: topItems[0] ? (pickTitle(topItems[0]) || "") : "",
-                items: topItems.map((it) => simplifyItem("book", it))
+                category,
+                seedTitle: topItems[0] ? (pickTitle(topItems[0]) || "") : (last.seedTitle || ""),
+                items: topItems.map((it) => ({ id: idForBook(it), title: pickTitle(it) || "Untitled", thumb: pickThumb(it) }))
             };
             reply(res, text, {
-                books_done: true,
-                genre: freeBookQuery ? "" : (rawBook ?? ""),
-                category: String(freeBookQuery || bookCanon),
                 lastQueryAt: new Date().toISOString(),
                 lastQueryUrl: usedUrl,
                 source,
                 last_list: remembered,
-                last_selected_index: null,
-                next_offset: 6, // page size alignment
-                seen_ids: Array.from(seenBooks),
-                video_order_idx: Number(params.video_order_idx) || 0,
-                last_video_page_token: null,
-                seen_video_ids: []
-            }, payload);
-            return;
-        }
-        /* -------- VIDEOS (first page) -------- */
-        if (isVideos) {
-            if (!videoCanon && !freeVideoQuery) {
-                reply(res, PROMPT_VIDEOS);
-                return;
-            }
-            const vFirst = await fetchVideosByTopic((videoCanon || "kids"), { startIndex: 0, lang, pageToken: null, freeQuery: freeVideoQuery || null });
-            let items = vFirst.items;
-            const usedUrl = vFirst.usedUrl;
-            const source = vFirst.source;
-            const nextPageToken = vFirst.nextPageToken || null;
-            // strict topic filter only for free-text video queries
-            if (freeVideoQuery) {
-                const topicOnly = freeVideoQuery.replace(/\s+for\s+kids\b/i, "").trim();
-                const filtered = items.filter((it) => videoMatchesTopic(it, topicOnly));
-                if (filtered.length >= 3)
-                    items = filtered;
-            }
-            const display = freeVideoQuery || rawVideo || videoCanon;
-            const topItems = items.slice(0, 5);
-            const top = topItems.map((it, i) => `${i + 1}. ${pickTitle(it) ?? "Untitled"}`).filter(Boolean);
-            const text = top.length
-                ? `Here are some videos about "${display}":\n${top.join("\n")}`
-                : `I couldn't find videos about "${display}". Try another topic?`;
-            const cards = topItems.map((it) => {
-                const title = pickTitle(it) ?? "Untitled";
-                const subtitle = it?.channel || it?.channelTitle || it?.snippet?.channelTitle || null;
-                const img = pickThumb(it);
-                const vid = idForVideo(it);
-                const watch = pickLinkVideo(it) || (vid ? `https://www.youtube.com/watch?v=${vid}` : "");
-                const embed = vid ? `https://www.youtube.com/embed/${vid}` : watch;
-                const href = buildPreviewLink("video", {
-                    id: vid, title, image: img || "", link: embed, url: watch,
-                    topic: String(freeVideoQuery || videoCanon), source
-                });
-                return makeInfoCard(title, subtitle, img, href);
-            });
-            const payload = { richContent: [cards.length ? [...cards] : [], [{ type: "chips", options: [{ text: "More like this" }, { text: "Recommend similar" }] }]] };
-            const seenV = new Set();
-            for (const it of topItems) {
-                const id = idForVideo(it);
-                if (id)
-                    seenV.add(id);
-            }
-            const remembered = {
-                kind: "video",
-                topic: String(freeVideoQuery || videoCanon),
-                seedTitle: topItems[0] ? (pickTitle(topItems[0]) || "") : "",
-                items: topItems.map((it) => simplifyItem("video", it))
-            };
-            reply(res, text, {
-                videos_done: true,
-                genre: "",
-                genre_video: String(freeVideoQuery || rawVideo || videoCanon || ""),
-                category: String(freeVideoQuery || videoCanon),
-                lastQueryAt: new Date().toISOString(),
-                lastQueryUrl: usedUrl,
-                source,
-                last_list: remembered,
-                last_selected_index: null,
-                next_offset: 6, // align with page size
-                video_order_idx: 0,
-                last_video_page_token: nextPageToken,
-                seen_video_ids: Array.from(seenV)
-            }, payload);
-            return;
-        }
-        /* -------- “MORE LIKE THIS” -------- */
-        if (tagKey === "more_like_this") {
-            const p = req.body?.sessionInfo?.parameters || {};
-            const last = p.last_list || {};
-            const kind = last.kind;
-            if (!kind) {
-                reply(res, "Do you want more books or more videos?", {}, {
-                    richContent: [[{ type: "chips", options: [{ text: "Books" }, { text: "Videos" }] }]]
-                });
-                return;
-            }
-            if (kind === "book") {
-                const category = last.category || p.category;
-                if (!category) {
-                    reply(res, "Which book category should I continue? (e.g., Fiction, Non-fiction)");
-                    return;
-                }
-                let startIndex = Math.max(0, Number(p.next_offset) || 0);
-                const seen = new Set(Array.isArray(p.seen_ids) ? p.seen_ids : []);
-                const fresh = [];
-                let usedUrl = "";
-                let source = "app";
-                // Try up to 10 mini-pages (6 each) or until we gather 5 fresh
-                for (let tries = 0; tries < 10 && fresh.length < 5; tries += 1) {
-                    const page = await fetchBooksByCategory(String(category), {
-                        startIndex, lang: p.language, age: p.age, ageGroup: p.age_group
-                    });
-                    const uniques = uniqNew(page.items, seen, "book");
-                    if (uniques.length > 0) {
-                        fresh.push(...uniques);
-                        usedUrl = page.usedUrl;
-                        source = page.source;
-                    }
-                    else {
-                        // fallback to Google Books if app endpoint yields nothing new
-                        if (page.source === "app") {
-                            const { term, juvenile } = bookQueryFor(String(category));
-                            const g = new URL("https://www.googleapis.com/books/v1/volumes");
-                            g.searchParams.set("q", `${term}${juvenile ? " subject:juvenile" : ""}`);
-                            if (p.language)
-                                g.searchParams.set("langRestrict", String(p.language));
-                            g.searchParams.set("maxResults", "6");
-                            g.searchParams.set("startIndex", String(startIndex));
-                            if (process.env.BOOKS_API_KEY)
-                                g.searchParams.set("key", process.env.BOOKS_API_KEY);
-                            const data = await getJSON(g.toString());
-                            const uniques2 = uniqNew(Array.isArray(data?.items) ? data.items : [], seen, "book");
-                            if (uniques2.length > 0) {
-                                fresh.push(...uniques2);
-                                usedUrl = g.toString();
-                                source = "google_books";
-                            }
-                        }
-                        else {
-                            usedUrl = page.usedUrl;
-                            source = page.source;
-                        }
-                    }
-                    startIndex += 6; // advance by true fetch size
-                }
-                const topItems = fresh.slice(0, 5);
-                const list = topItems.map((it, i) => `${i + 1}. ${pickTitle(it) ?? "Untitled"}`).join("\n");
-                const text = topItems.length
-                    ? `Here are more book picks on "${category}":\n${list}`
-                    : `I couldn't find more results for "${category}". Try another category?`;
-                const cards = topItems.map((it) => {
-                    const title = pickTitle(it) ?? "Untitled";
-                    const authorsArr = pickAuthorsArray(it);
-                    const subtitle = authorsArr.length ? authorsArr.join(", ") : null;
-                    const img = pickThumb(it);
-                    const desc = pickDescription(it);
-                    const href = buildPreviewLink("book", {
-                        id: idForBook(it),
-                        title,
-                        image: img || "",
-                        link: pickLinkBook(it) || "",
-                        authors: authorsArr.join(", "),
-                        snippet: String(desc).slice(0, 500),
-                        category: String(category),
-                        source
-                    });
-                    return makeInfoCard(title, subtitle, img, href);
-                });
-                const payload = { richContent: [cards.length ? [...cards] : [], [{ type: "chips", options: [{ text: "More like this" }, { text: "Recommend similar" }] }]] };
-                const remembered = {
-                    kind: "book",
-                    category,
-                    seedTitle: topItems[0] ? (pickTitle(topItems[0]) || "") : (last.seedTitle || ""),
-                    items: topItems.map((it) => simplifyItem("book", it))
-                };
-                for (const it of topItems) {
-                    const id = idForBook(it);
-                    if (id)
-                        seen.add(id);
-                }
-                reply(res, text, {
-                    lastQueryAt: new Date().toISOString(),
-                    lastQueryUrl: usedUrl,
-                    source,
-                    last_list: remembered,
-                    last_selected_index: null,
-                    next_offset: Math.max(Number(p.next_offset) || 0, startIndex), // keep moving window
-                    seen_ids: Array.from(seen)
-                }, payload);
-                return;
-            }
-            // ---- videos ----
-            const topic = last.topic || p.category || p.topic;
-            if (!topic) {
-                reply(res, "Which video topic should I continue? (e.g., Stories, Animals)");
-                return;
-            }
-            let startIndex = Math.max(0, Number(p.next_offset) || 0);
-            let pageToken = p.last_video_page_token || null;
-            const seenV = new Set(Array.isArray(p.seen_video_ids) ? p.seen_video_ids : []);
-            const freshV = [];
-            let usedUrlV = "";
-            let sourceV = "app";
-            let lastToken = pageToken;
-            for (let tries = 0; tries < 10 && freshV.length < 5; tries += 1) {
-                const page = await fetchVideosByTopic(String(topic), { startIndex, lang: p.language, pageToken });
-                const uniques = uniqNew(page.items, seenV, "video");
-                if (uniques.length > 0) {
-                    freshV.push(...uniques);
-                    usedUrlV = page.usedUrl;
-                    sourceV = page.source;
-                    lastToken = page.nextPageToken || lastToken;
-                }
-                else {
-                    if (page.source === "app") {
-                        const q = videoQueryFor(String(topic));
-                        const y = new URL("https://www.googleapis.com/youtube/v3/search");
-                        y.searchParams.set("part", "snippet");
-                        y.searchParams.set("type", "video");
-                        y.searchParams.set("videoEmbeddable", "true");
-                        y.searchParams.set("safeSearch", "strict");
-                        y.searchParams.set("maxResults", "6");
-                        y.searchParams.set("q", q);
-                        if (pageToken)
-                            y.searchParams.set("pageToken", String(pageToken));
-                        if (process.env.YOUTUBE_API_KEY)
-                            y.searchParams.set("key", process.env.YOUTUBE_API_KEY);
-                        const data = await getJSON(y.toString());
-                        const uniques2 = uniqNew(Array.isArray(data?.items) ? data.items : [], seenV, "video");
-                        if (uniques2.length > 0) {
-                            freshV.push(...uniques2);
-                            usedUrlV = y.toString();
-                            sourceV = "youtube";
-                            lastToken = data?.nextPageToken || lastToken;
-                        }
-                    }
-                    else {
-                        usedUrlV = page.usedUrl;
-                        sourceV = page.source;
-                        lastToken = page.nextPageToken || lastToken;
-                    }
-                }
-                startIndex += 6;
-                pageToken = lastToken;
-            }
-            const topItemsV = freshV.slice(0, 5);
-            const listV = topItemsV.map((it, i) => `${i + 1}. ${pickTitle(it) ?? "Untitled"}`).join("\n");
-            const textV = topItemsV.length ? `Here are more videos about "${topic}":\n${listV}` : `I couldn't find more videos about "${topic}".`;
-            const cardsV = topItemsV.map((it) => {
-                const title = pickTitle(it) ?? "Untitled";
-                const subtitle = it?.channel || it?.channelTitle || it?.snippet?.channelTitle || null;
-                const img = pickThumb(it);
-                const vid = idForVideo(it);
-                const watch = pickLinkVideo(it) || (vid ? `https://www.youtube.com/watch?v=${vid}` : "");
-                const embed = vid ? `https://www.youtube.com/embed/${vid}` : watch;
-                const href = buildPreviewLink("video", { id: vid, title, image: img || "", link: embed, url: watch, topic: String(topic), source: sourceV });
-                return makeInfoCard(title, subtitle, img, href);
-            });
-            const payloadV = { richContent: [cardsV.length ? [...cardsV] : [], [{ type: "chips", options: [{ text: "More like this" }, { text: "Recommend similar" }] }]] };
-            const rememberedV = {
-                kind: "video",
-                topic,
-                seedTitle: topItemsV[0] ? (pickTitle(topItemsV[0]) || "") : (last.seedTitle || ""),
-                items: topItemsV.map((it) => simplifyItem("video", it))
-            };
-            for (const it of topItemsV) {
-                const id = idForVideo(it);
-                if (id)
-                    seenV.add(id);
-            }
-            reply(res, textV, {
-                lastQueryAt: new Date().toISOString(),
-                lastQueryUrl: usedUrlV,
-                source: sourceV,
-                last_list: rememberedV,
                 last_selected_index: null,
                 next_offset: Math.max(Number(p.next_offset) || 0, startIndex),
-                last_video_page_token: lastToken || null,
-                seen_video_ids: Array.from(seenV)
-            }, payloadV);
+                seen_ids: Array.from(seen),
+                last_algo: "category",
+                algo_used: "category_more",
+                mode
+            }, { richContent: [cards, [{ type: "chips", options: [{ text: "Show more" }] }]] });
             return;
         }
-        // Fallback for unexpected tags
-        reply(res, WELCOME_LINE);
+        // ---------- D) VIDEOS pagination fallback ----------
+        const topic = last.topic || p.category || p.topic;
+        if (!topic) {
+            reply(res, "Which video topic should I continue? (e.g., Stories, Animals)");
+            return;
+        }
+        let startIndex = Math.max(0, Number(p.next_offset) || 0);
+        let pageToken = p.last_video_page_token || null;
+        const seenV = new Set(Array.isArray(p.seen_video_ids) ? p.seen_video_ids : []);
+        const freshV = [];
+        let usedUrlV = "";
+        let sourceV = "app";
+        let lastToken = pageToken;
+        for (let tries = 0; tries < 10 && freshV.length < 5; tries += 1) {
+            const page = await fetchVideosByTopic(String(topic), { startIndex, lang: p.language, pageToken });
+            const uniques = page.items.filter((it) => { const id = idForVideo(it); return id && !seenV.has(id); });
+            if (uniques.length > 0) {
+                freshV.push(...uniques);
+                usedUrlV = page.usedUrl;
+                sourceV = page.source;
+                lastToken = page.nextPageToken || lastToken;
+            }
+            else if (page.source === "app") {
+                const q = videoQueryFor(String(topic));
+                const y = new URL("https://www.googleapis.com/youtube/v3/search");
+                y.searchParams.set("part", "snippet");
+                y.searchParams.set("type", "video");
+                y.searchParams.set("videoEmbeddable", "true");
+                y.searchParams.set("safeSearch", "strict");
+                y.searchParams.set("maxResults", "6");
+                y.searchParams.set("q", q);
+                if (pageToken)
+                    y.searchParams.set("pageToken", String(pageToken));
+                if (process.env.YOUTUBE_API_KEY)
+                    y.searchParams.set("key", process.env.YOUTUBE_API_KEY);
+                const data = await getJSON(y.toString());
+                const uniques2 = (Array.isArray(data?.items) ? data.items : []).filter((it) => {
+                    const id = idForVideo(it);
+                    return id && !seenV.has(id);
+                });
+                if (uniques2.length > 0) {
+                    freshV.push(...uniques2);
+                    usedUrlV = y.toString();
+                    sourceV = "youtube";
+                    lastToken = data?.nextPageToken || lastToken;
+                }
+            }
+            else {
+                usedUrlV = page.usedUrl;
+                sourceV = page.source;
+                lastToken = page.nextPageToken || lastToken;
+            }
+            startIndex += 6;
+            pageToken = lastToken;
+        }
+        const topItemsV = freshV.slice(0, 5);
+        const textV = topItemsV.length
+            ? `Here are more similar picks related to "${topic}":\n` +
+                asNumbered(topItemsV.map((it) => ({ title: pickTitle(it) || "Untitled", type: "video" })), 5)
+            : `I couldn't find more videos about "${topic}".`;
+        const cardsV = topItemsV.map((it) => {
+            const title = pickTitle(it) ?? "Untitled";
+            const vAuthor = it?.channel || it?.channelTitle || it?.snippet?.channelTitle || "";
+            const authorCount = vAuthor ? "1" : "0";
+            const img = pickThumb(it);
+            const vid = idForVideo(it);
+            const watch = pickLinkVideo(it) || (vid ? `https://www.youtube.com/watch?v=${vid}` : "");
+            const embed = vid ? `https://www.youtube.com/embed/${vid}` : watch;
+            const vDesc = String(it?.snippet?.description || "").slice(0, 500);
+            const href = buildPreviewLink("video", {
+                id: vid,
+                title,
+                image: img || "",
+                link: embed,
+                url: watch,
+                author: vAuthor,
+                authorCount,
+                description: vDesc,
+                snippet: vDesc,
+                topic: String(topic),
+                source: sourceV
+            });
+            return makeInfoCard(title, vAuthor || null, img, href);
+        });
+        topItemsV.forEach(it => { const id = idForVideo(it); if (id)
+            seenV.add(id); });
+        const rememberedV = {
+            kind: "video",
+            topic,
+            seedTitle: topItemsV[0] ? (pickTitle(topItemsV[0]) || "") : (last.seedTitle || ""),
+            items: topItemsV.map((it) => ({ id: idForVideo(it), title: pickTitle(it) || "Untitled", thumb: pickThumb(it) }))
+        };
+        reply(res, textV, {
+            lastQueryAt: new Date().toISOString(),
+            lastQueryUrl: usedUrlV,
+            source: sourceV,
+            last_list: rememberedV,
+            last_selected_index: null,
+            next_offset: Math.max(Number(p.next_offset) || 0, startIndex),
+            last_video_page_token: lastToken || null,
+            seen_video_ids: Array.from(seenV),
+            last_algo: "category",
+            algo_used: "category_more",
+            mode
+        }, { richContent: [cardsV, [{ type: "chips", options: [{ text: "Show more" }] }]] });
+        return;
     }
-    catch (err) {
-        logger.error("Webhook error", { err: String(err?.message || err) });
-        reply(res, "Something went wrong fetching results. Please try again.");
+    // ------------------------ Decision Tree (re-ordered) ------------------------
+    if (tagKey === "more_like_this") {
+        // early handled
+        logger.info("DECISION_DBG", { branch: "skip: more_like_this handled earlier" });
+        return;
     }
+    const { seed, desiredType, categoryOrTopic } = buildSeed(freeQuery, forcedType, explicit, rawBook, bookCanon, rawVideo, videoCanon, rawUtterance);
+    // Helpful breadcrumbs in logs
+    logger.info("DECISION_DBG", {
+        tagKey, preferPersonal, seed, desiredType, categoryOrTopic,
+        bookCanon, videoCanon, freeBookQuery, freeVideoQuery
+    });
+    // If generic ask / missing seed, prompt category instead of ANN
+    if (!preferPersonal && (gen.generic ||
+        (explicit.kind === "book" && !explicit.term) ||
+        (explicit.kind === "video" && !explicit.term) ||
+        (["books", "findbooks", "book"].includes(tagKey) && !effFreeBookQuery && !bookCanon) ||
+        (["videos", "findvideos", "video"].includes(tagKey) && !effFreeVideoQuery && !videoCanon))) {
+        const wantBooks = gen.books || explicit.kind === "book" || ["books", "findbooks", "book"].includes(tagKey);
+        const wantVideos = gen.videos || explicit.kind === "video" || ["videos", "findvideos", "video"].includes(tagKey);
+        if (wantBooks && !wantVideos) {
+            reply(res, PROMPT_BOOKS, { algo_used: "category_prompt", mode });
+            return;
+        }
+        if (wantVideos && !wantBooks) {
+            reply(res, PROMPT_VIDEOS, { algo_used: "category_prompt", mode });
+            return;
+        }
+        reply(res, WELCOME_LINE, { algo_used: "welcome", mode });
+        return;
+    }
+    // Keep TS happy: best type hint
+    const typeHint = desiredType ?? (["findvideos", "videos", "video"].includes(tagKey) ? "video"
+        : ["findbooks", "books", "book"].includes(tagKey) ? "book"
+            : null);
+    // --- Personalized "nudge" branch: prompt user to be specific when seed is low-info ---
+    if (preferPersonal && (!seed || !seed.trim() || blockAnn) && !categoryOrTopic) {
+        // Build suggestion chips tailored to the user
+        const chips = await buildPersonalizedSuggestions(userId, lang);
+        const chipPayload = chips.length
+            ? { richContent: [[{ type: "chips", options: chips.map(t => ({ text: t })) }]] }
+            : undefined;
+        reply(res, "To personalize better, tell me a topic or author.\nTry one of these:", { userId, algo_used: "personalize_prompt" }, chipPayload);
+        return;
+    }
+    // If personalization is on but seed is low-info, use category/topic as the seed
+    if (preferPersonal && (!seed || !seed.trim() || blockAnn) && categoryOrTopic) {
+        const effectiveSeed = categoryOrTopic.trim();
+        const rRec = await tryPersonalizer(effectiveSeed, typeHint, categoryOrTopic);
+        if (rRec === "DONE")
+            return;
+        // ANN fallback (with kids bias) before category lists
+        const rAnn = await tryANN(effectiveSeed, {
+            forcedType: typeHint,
+            personalize: true,
+            mode,
+            contextTag: categoryOrTopic
+        });
+        if (rAnn === "DONE")
+            return;
+    }
+    // ANN vs Personalizer
+    if (!seed || !seed.trim() || blockAnn) {
+        // fall-through to category/topic flows
+        logger.info("DECISION_DBG", { branch: (!seed || !seed.trim()) ? "no-seed → category/topic" : "blocked-low-info → category/topic", annEligibleSeed });
+    }
+    else {
+        if (preferPersonal) {
+            logger.info("DECISION_DBG", { branch: "personalized → recommender first", seed, desiredType, categoryOrTopic });
+            const rRec = await tryPersonalizer(seed, typeHint, categoryOrTopic);
+            if (rRec === "DONE")
+                return;
+            logger.info("DECISION_DBG", { branch: "personalized → recommender empty → ANN fallback" });
+            const rAnn = await tryANN(seed, {
+                forcedType: typeHint,
+                personalize: true,
+                mode,
+                contextTag: categoryOrTopic
+            });
+            if (rAnn === "DONE")
+                return;
+        }
+        else {
+            logger.info("DECISION_DBG", { branch: "ann-mode → ANN first", seed, desiredType, categoryOrTopic });
+            const rAnn = await tryANN(seed, {
+                forcedType: typeHint,
+                personalize: false,
+                mode,
+                contextTag: categoryOrTopic
+            });
+            if (rAnn === "DONE")
+                return;
+        }
+    }
+    // Category/Topic fallbacks
+    const isBooks = ["findbooks", "books", "book"].includes(tagKey);
+    const isVideos = ["findvideos", "videos", "video"].includes(tagKey);
+    if (!isBooks && !isVideos && tagKey !== "more_like_this") {
+        reply(res, WELCOME_LINE, { algo_used: "welcome", mode });
+        return;
+    }
+    // BOOKS first page
+    if (isBooks) {
+        let bookPath = null;
+        const utterNonGeneric = !isGenericAsk(rawUtterance).generic;
+        const looksLikeBooks = ["findbooks", "books", "book"].includes(tagKey) || /\bbooks?\b/i.test(rawUtterance);
+        if (effFreeBookQuery) {
+            try {
+                bookPath = await resolveBookQuery(freeBookQuery, lang);
+            }
+            catch { }
+        }
+        const haveFree = !!bookPath;
+        if (!bookCanon && !haveFree) {
+            reply(res, PROMPT_BOOKS, { algo_used: "category_prompt", mode });
+            return;
+        }
+        if (!bookPath && (looksLikeBooks || utterNonGeneric) && !bookCanon) {
+            try {
+                bookPath = await resolveBookQuery(rawUtterance, lang);
+            }
+            catch { }
+        }
+        let items = [];
+        let usedUrl = "";
+        let source = "app";
+        let display = effFreeBookQuery || rawBook || bookCanon || "books";
+        if (haveFree) {
+            if (bookPath.mode === "category") {
+                const first = await fetchBooksByCategory(bookPath.canon, { startIndex: 0, lang, age, ageGroup });
+                items = first.items;
+                usedUrl = first.usedUrl;
+                source = first.source;
+                display = bookPath.display || String(bookPath.canon);
+            }
+            else {
+                const first = await fetchBooksBySearch(bookPath.q, { page: 1, pageSize: 12, lang });
+                items = first.items;
+                usedUrl = first.usedUrl;
+                source = first.source;
+                display = bookPath.display;
+                if (bookPath.mode === "topic") {
+                    const filtered = items.filter((it) => bookMatchesTopic(it, bookPath.q));
+                    if (filtered.length >= 3)
+                        items = filtered;
+                }
+            }
+        }
+        else {
+            const first = await fetchBooksByCategory(bookCanon, { startIndex: 0, lang, age, ageGroup });
+            items = first.items;
+            usedUrl = first.usedUrl;
+            source = first.source;
+            display = rawBook || bookCanon || "books";
+        }
+        const topItems = items.slice(0, 6);
+        const topText = topItems.map((it, i) => `${i + 1}. ${pickTitle(it) || "Untitled"}`).join("\n");
+        const text = topItems.length
+            ? `Here are some book picks on "${display}":\n${topText}`
+            : `I couldn't find books on "${display}". Try another topic or category?`;
+        const categoryForPreview = (haveFree && bookPath?.mode === "category")
+            ? String(bookPath.canon)
+            : String(effFreeBookQuery || bookCanon);
+        const cards = topItems.map((it) => {
+            const title = pickTitle(it) ?? "Untitled";
+            const authorList = pickAuthorsArray(it);
+            const author = authorList[0] || "";
+            const authorCount = String(authorList.length || 0);
+            const img = pickThumb(it);
+            const desc = String(pickDescription(it)).slice(0, 500);
+            const href = buildPreviewLink("book", {
+                id: idForBook(it),
+                title,
+                image: img || "",
+                link: pickLinkBook(it) || "",
+                author,
+                authorCount,
+                authors: authorList.join(", "),
+                description: desc,
+                snippet: desc,
+                category: categoryForPreview,
+                age: age ? String(age) : "",
+                source,
+            });
+            return makeInfoCard(title, authorList.length ? authorList.join(", ") : null, img, href);
+        });
+        const seen = new Set();
+        topItems.forEach(it => { const id = idForBook(it); if (id)
+            seen.add(id); });
+        const remembered = {
+            kind: "book",
+            category: categoryForPreview,
+            seedTitle: topItems[0] ? (pickTitle(topItems[0]) || "") : "",
+            items: topItems.map((it) => ({ id: idForBook(it), title: pickTitle(it) || "Untitled", thumb: pickThumb(it) }))
+        };
+        reply(res, text, {
+            books_done: true,
+            genre: haveFree ? "" : (rawBook ?? ""),
+            category: categoryForPreview,
+            lastQueryAt: new Date().toISOString(),
+            lastQueryUrl: usedUrl,
+            source,
+            last_list: remembered,
+            last_selected_index: null,
+            next_offset: 6,
+            seen_ids: Array.from(seen),
+            video_order_idx: Number(params.video_order_idx) || 0,
+            last_video_page_token: null,
+            seen_video_ids: [],
+            algo_used: "category",
+            mode
+        }, { richContent: [cards.length ? [...cards] : [], [{ type: "chips", options: [{ text: "Show more" }] }]] });
+        return;
+    }
+    // VIDEOS first page
+    if (isVideos) {
+        const haveFree = !!effFreeVideoQuery;
+        if (!videoCanon && !haveFree) {
+            reply(res, PROMPT_VIDEOS, { algo_used: "category_prompt", mode });
+            return;
+        }
+        const vFirst = await fetchVideosByTopic((videoCanon || "kids"), {
+            startIndex: 0,
+            lang,
+            pageToken: null,
+            freeQuery: haveFree ? effFreeVideoQuery : null
+        });
+        let items = vFirst.items;
+        const usedUrl = vFirst.usedUrl;
+        const source = vFirst.source;
+        const nextPageToken = vFirst.nextPageToken || null;
+        if (haveFree) {
+            const topicOnly = effFreeVideoQuery.replace(/\s+for\s+kids\b/i, "").trim();
+            const filtered = items.filter((it) => videoMatchesTopic(it, topicOnly));
+            if (filtered.length >= 3)
+                items = filtered;
+        }
+        const display = effFreeVideoQuery || rawVideo || videoCanon || "kids";
+        const topItems = items.slice(0, 6);
+        const topText = topItems.map((it, i) => `${i + 1}. ${pickTitle(it) || "Untitled"}`).join("\n");
+        const text = topItems.length
+            ? `Here are some videos on "${display}":\n${topText}`
+            : `I couldn't find videos on "${display}". Try another topic?`;
+        const topicForPreview = String(effFreeVideoQuery || videoCanon || "kids");
+        const cards = topItems.map((it) => {
+            const title = pickTitle(it) ?? "Untitled";
+            const vAuthor = it?.channel || it?.channelTitle || it?.snippet?.channelTitle || "";
+            const authorCount = vAuthor ? "1" : "0";
+            const img = pickThumb(it);
+            const vid = idForVideo(it);
+            const watch = pickLinkVideo(it) || (vid ? `https://www.youtube.com/watch?v=${vid}` : "");
+            const embed = vid ? `https://www.youtube.com/embed/${vid}` : watch;
+            const vDesc = String(it?.snippet?.description || "").slice(0, 500);
+            const href = buildPreviewLink("video", {
+                id: vid,
+                title,
+                image: img || "",
+                link: embed,
+                url: watch,
+                author: vAuthor,
+                authorCount,
+                description: vDesc,
+                snippet: vDesc,
+                topic: topicForPreview,
+                source
+            });
+            return makeInfoCard(title, vAuthor || null, img, href);
+        });
+        const seenV = new Set();
+        topItems.forEach(it => { const id = idForVideo(it); if (id)
+            seenV.add(id); });
+        const remembered = {
+            kind: "video",
+            topic: topicForPreview,
+            seedTitle: topItems[0] ? (pickTitle(topItems[0]) || "") : "",
+            items: topItems.map((it) => ({ id: idForVideo(it), title: pickTitle(it) || "Untitled", thumb: pickThumb(it) }))
+        };
+        reply(res, text, {
+            videos_done: true,
+            genre: "",
+            genre_video: String(freeVideoQuery || rawVideo || videoCanon || ""),
+            category: topicForPreview,
+            lastQueryAt: new Date().toISOString(),
+            lastQueryUrl: usedUrl,
+            source,
+            last_list: remembered,
+            last_selected_index: null,
+            next_offset: 6,
+            video_order_idx: 0,
+            last_video_page_token: nextPageToken,
+            seen_video_ids: Array.from(seenV),
+            algo_used: "category",
+            mode
+        }, { richContent: [cards.length ? [...cards] : [], [{ type: "chips", options: [{ text: "Show more" }] }]] });
+        return;
+    }
+    // default welcome
+    reply(res, WELCOME_LINE, { algo_used: "welcome", mode });
 });
-/* =================== UTILS: EMBEDDING + ANN (Postgres + pgvector) =================== */
-/** shared pool (warm instances reuse connections) */
+/* =================== EMBEDDING + ANN (Postgres + pgvector) =================== */
+const socketPath = process.env.INSTANCE_UNIX_SOCKET || ""; // e.g. /cloudsql/project:region:instance
+const isSocket = !!socketPath;
 const pool = new pg_1.Pool({
-    host: process.env.PGHOST,
-    port: Number(process.env.PGPORT || 5432),
     user: process.env.PGUSER,
     password: process.env.PGPASSWORD,
     database: process.env.PGDATABASE,
-    ssl: process.env.PGSSL ? { rejectUnauthorized: false } : undefined,
-    max: 5
+    host: isSocket ? socketPath : process.env.PGHOST,
+    port: Number(process.env.PGPORT || 5432),
+    ssl: isSocket
+        ? undefined
+        : (process.env.PGSSL ? { rejectUnauthorized: false } : undefined),
+    max: 5,
 });
 async function pgQuery(text, params) {
     const res = await pool.query(text, params);
     return { rows: res.rows };
 }
-/** Embed with OpenAI (cheap model) */
 async function embedTextOpenAI(text) {
     const r = await (0, undici_1.fetch)("https://api.openai.com/v1/embeddings", {
         method: "POST",
@@ -844,22 +1844,165 @@ async function embedTextOpenAI(text) {
             "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
             "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-            model: "text-embedding-3-small",
-            input: text
-        })
+        body: JSON.stringify({ model: "text-embedding-3-small", input: text })
     });
     if (!r.ok) {
-        const t = await r.text();
+        const t = await r.text().catch(() => "");
         throw new Error(`OpenAI embed failed: ${r.status} ${t}`);
     }
-    const data = await r.json();
+    const data = await r.json().catch(() => ({}));
     const vec = data?.data?.[0]?.embedding || [];
     if (!Array.isArray(vec) || !vec.length)
         throw new Error("empty embedding");
     return vec;
 }
-/** POST /embed  { text } -> { vector }  (parity with your old function name) */
+async function embedText(text) {
+    // prefer direct OpenAI; fall back to local embedTexts util
+    try {
+        return await embedTextOpenAI(text);
+    }
+    catch (e) {
+        logger.warn("embedTextOpenAI failed, fallback to local embedTexts()", String(e?.message || e));
+        const out = await (0, openai_1.embedTexts)([text]);
+        if (!Array.isArray(out) || !out[0] || !Array.isArray(out[0])) {
+            throw new Error("embedTexts fallback returned invalid vector");
+        }
+        return out[0];
+    }
+}
+/* -------------------- Direct SQL (pgvector) -------------------- */
+async function annNearest(query, limit = 6, type) {
+    const emb = await embedText(query);
+    const vecLit = `[${emb.join(",")}]`;
+    const params = [];
+    const where = [];
+    if (type) {
+        params.push(type);
+        // NOTE: in your DB the column is "type" (items.type), not "kind"
+        where.push(`LOWER(type) = $${params.length}`);
+    }
+    const whereSQL = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const sql = `
+    SELECT
+      id,
+      LOWER(type) AS type,
+      title,
+      authors,
+      description,
+      link,
+      thumb,
+      (embedding <#> $${params.length + 1}::vector) AS dist
+    FROM public.items
+    ${whereSQL}
+    ORDER BY embedding <#> $${params.length + 1}::vector
+    LIMIT $${params.length + 2}
+  `;
+    params.push(vecLit, limit);
+    const { rows } = await pgQuery(sql, params);
+    return rows.map((r) => ({
+        id: r.id,
+        kind: r.type === "video" ? "video" : "book",
+        title: r.title,
+        authors: Array.isArray(r.authors) ? r.authors : (r.authors ? [String(r.authors)] : []),
+        description: r.description ?? null,
+        link: r.link ?? null,
+        thumb: r.thumb ?? null,
+        dist: Number(r.dist) || 0,
+    }));
+}
+/* -------------------- HTTP fallback (annSearch CF) -------------------- */
+const ANN_HTTP_URL = process.env.ANN_URL ||
+    "https://asia-southeast1-kidflix-4cda0.cloudfunctions.net/annSearch";
+async function annNearestHttp(text, k = 6, forcedType) {
+    const body = { text, k };
+    if (forcedType)
+        body.filters = { kind: forcedType };
+    const r = await (0, undici_1.fetch)(ANN_HTTP_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+        const t = await r.text().catch(() => "");
+        throw new Error(`ANN HTTP ${r.status} ${t}`);
+    }
+    let j;
+    try {
+        j = await r.json();
+    }
+    catch {
+        const t = await r.text().catch(() => "");
+        logger.warn("ANN_HTTP_BAD_JSON", t.slice(0, 300));
+        return [];
+    }
+    const raw = Array.isArray(j?.results) ? j.results
+        : Array.isArray(j?.items) ? j.items
+            : [];
+    logger.info("ANN_HTTP_RESP", { count: raw.length, sample: raw[0]?.id || null });
+    return raw.map((x) => ({
+        id: x.id,
+        kind: (x.kind === "video" ? "video" : "book"),
+        title: x.title,
+        authors: Array.isArray(x.authors) ? x.authors : (x.authors ? [String(x.authors)] : []),
+        description: x.description ?? null,
+        link: x?.metadata?.link ?? x.link ?? null,
+        thumb: x?.metadata?.thumb ?? x.thumb ?? null,
+        score: typeof x.score === "number" ? x.score : undefined,
+    }));
+}
+/* -------------------- Optional: MMR helper (diversity) -------------------- */
+function cosine(a, b) {
+    let dot = 0, na = 0, nb = 0;
+    for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        na += a[i] * a[i];
+        nb += b[i] * b[i];
+    }
+    if (!na || !nb)
+        return 0;
+    return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+function mmrRerank(cands, k = 6, lambda = 0.7) {
+    const chosen = [];
+    const rest = [...cands];
+    while (chosen.length < k && rest.length) {
+        let bestIdx = 0, bestVal = -Infinity;
+        for (let i = 0; i < rest.length; i++) {
+            const r = rest[i];
+            const maxSim = chosen.length
+                ? Math.max(...chosen.map(c => cosine(r.embedding, c.embedding)))
+                : 0;
+            const val = lambda * r.score - (1 - lambda) * maxSim;
+            if (val > bestVal) {
+                bestVal = val;
+                bestIdx = i;
+            }
+        }
+        chosen.push(rest.splice(bestIdx, 1)[0]);
+    }
+    return chosen;
+}
+/* ----------------------------- Health/debug endpoints ----------------------------- */
+exports.health = (0, https_1.onRequest)(async (_req, res) => {
+    try {
+        const e = await embedTextOpenAI("hello kids");
+        const { rows } = await pgQuery("SELECT COUNT(*)::int AS c FROM contents");
+        res.json({ ok: true, embedDims: e.length, rows: rows[0]?.c ?? 0 });
+    }
+    catch (err) {
+        res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+});
+exports.annCount = (0, https_1.onRequest)(async (_req, res) => {
+    try {
+        const { rows } = await pgQuery("SELECT COUNT(*)::int AS c FROM contents");
+        res.json({ rows: rows[0]?.c ?? 0 });
+    }
+    catch (e) {
+        res.status(500).json({ error: e?.message || "count error" });
+    }
+});
+/* ----------------------------- Vector utilities ----------------------------- */
 exports.embed = (0, https_1.onRequest)({ region: "asia-southeast1", memory: "512MiB", timeoutSeconds: 120 }, async (req, res) => {
     try {
         const { text } = (req.body ?? {});
@@ -875,9 +2018,6 @@ exports.embed = (0, https_1.onRequest)({ region: "asia-southeast1", memory: "512
         res.status(500).json({ error: e?.message || "embed error" });
     }
 });
-/** POST /ann/upsert
- * body: { items: [{ id, text?, vector?, kind?, title?, authors?, description?, metadata? }] }
- */
 exports.annUpsert = (0, https_1.onRequest)({ region: "asia-southeast1", memory: "512MiB", timeoutSeconds: 120 }, async (req, res) => {
     try {
         const { items } = (req.body ?? {});
@@ -904,8 +2044,9 @@ exports.annUpsert = (0, https_1.onRequest)({ region: "asia-southeast1", memory: 
             let vec = it.vector;
             if (!vec && it.text)
                 vec = await embedTextOpenAI(String(it.text));
-            if (!vec || !Array.isArray(vec) || vec.length === 0)
+            if (!vec || !Array.isArray(vec) || vec.length === 0) {
                 throw new Error(`item ${it.id} missing vector or text`);
+            }
             const params = [
                 String(it.id),
                 String(it.kind || "book"),
@@ -913,7 +2054,7 @@ exports.annUpsert = (0, https_1.onRequest)({ region: "asia-southeast1", memory: 
                 Array.isArray(it.authors) ? it.authors : [],
                 String(it.description || ""),
                 it.metadata ? JSON.stringify(it.metadata) : "{}",
-                `[${vec.join(",")}]` // pgvector accepts array literal cast by ::vector
+                `[${vec.join(",")}]`,
             ];
             await pgQuery(upsertSQL, params);
             count += 1;
@@ -925,50 +2066,67 @@ exports.annUpsert = (0, https_1.onRequest)({ region: "asia-southeast1", memory: 
         res.status(500).json({ error: e?.message || "upsert error" });
     }
 });
-/** POST /ann/search
- * body: { text?: string, vector?: number[], k?: number, filters?: { kind?: string, title_ilike?: string } }
- */
 exports.annSearch = (0, https_1.onRequest)({ region: "asia-southeast1", memory: "512MiB", timeoutSeconds: 120 }, async (req, res) => {
     try {
         const { text, vector, filters, k } = (req.body ?? {});
-        let qv = vector;
+        // 1) Get a query vector
+        let qv = Array.isArray(vector) ? vector : undefined;
         if (!qv && text)
             qv = await embedTextOpenAI(String(text));
-        if (!qv || !Array.isArray(qv) || qv.length === 0) {
+        if (!qv || qv.length === 0) {
             res.status(400).json({ error: "provide text or vector" });
             return;
         }
         const K = Math.min(Math.max(Number(k) || 20, 1), 200);
         const vecLit = `[${qv.join(",")}]`;
+        // 2) WHERE filters
         const where = [];
         const params = [];
         if (filters?.kind) {
-            params.push(String(filters.kind));
-            where.push(`kind = $${params.length}`);
+            params.push(String(filters.kind).toLowerCase());
+            where.push(`LOWER(type) = $${params.length}`);
         }
         if (filters?.title_ilike) {
             params.push(`%${String(filters.title_ilike)}%`.toLowerCase());
             where.push(`LOWER(title) LIKE $${params.length}`);
         }
         const whereSQL = where.length ? `WHERE ${where.join(" AND ")}` : "";
-        // cosine distance (<=>). Lower is closer; also compute similarity=1 - distance
+        // 3) Query items (production table)
         const sql = `
-        SELECT id, kind, title, authors, description, metadata,
-               1 - (embedding <=> $${params.length + 1}::vector) AS score
-        FROM contents
+        SELECT
+          id,
+          LOWER(type) AS type,
+          title,
+          authors,
+          description,
+          link,
+          thumb,
+          1 - (embedding <#> $${params.length + 1}::vector) AS score
+        FROM public.items
         ${whereSQL}
-        ORDER BY embedding <=> $${params.length + 1}::vector
+        ORDER BY embedding <#> $${params.length + 1}::vector
         LIMIT ${K}
       `;
         params.push(vecLit);
         const { rows } = await pgQuery(sql, params);
-        res.json({ results: rows });
+        // 4) Normalize to response shape
+        const results = rows.map((r) => ({
+            id: r.id,
+            kind: r.type === "video" ? "video" : "book",
+            title: r.title,
+            authors: Array.isArray(r.authors) ? r.authors : (r.authors ? [String(r.authors)] : []),
+            description: r.description ?? null,
+            metadata: { link: r.link ?? null, thumb: r.thumb ?? null },
+            score: Number(r.score) || 0,
+        }));
+        res.json({ results });
     }
     catch (e) {
         logger.error(e);
         res.status(500).json({ error: e?.message || "search error" });
     }
 });
+/* ----------------------------- App integration shims ----------------------------- */
 exports.embedItems = (0, https_1.onRequest)(async (req, res) => {
     try {
         const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
@@ -977,7 +2135,6 @@ exports.embedItems = (0, https_1.onRequest)(async (req, res) => {
             res.status(400).json({ error: "Provide texts: string[]" });
             return;
         }
-        // tip: dedupe & trim; keep each <= ~8000 tokens
         const vectors = await (0, openai_1.embedTexts)(texts);
         res.json({ vectors });
     }
@@ -1012,6 +2169,27 @@ exports.rebuildUserProfileHttp = (0, https_1.onRequest)(async (req, res) => {
     }
     catch (e) {
         res.status(500).json({ error: e.message });
+    }
+});
+/* ----------------------------- Clear per-session history ----------------------------- */
+exports.clearHistory = (0, https_1.onRequest)(async (req, res) => {
+    try {
+        const sessionId = req.query.session || "default";
+        const uidFromHeader = (req.headers["x-user-id"] || "").trim();
+        const uidFromQuery = (req.query.userId || "").trim();
+        // derive device anon key (for pre-auth clears)
+        const anonKey = `anon:${ensureAnonId(req)}`;
+        const keysToNuke = new Set();
+        if (uidFromHeader)
+            keysToNuke.add(uidFromHeader);
+        if (uidFromQuery)
+            keysToNuke.add(uidFromQuery);
+        keysToNuke.add(anonKey);
+        await Promise.all(Array.from(keysToNuke).map(k => db.collection("chat_threads").doc(threadKey(k, sessionId)).delete().catch(() => { })));
+        res.json({ ok: true, clearedFor: Array.from(keysToNuke) });
+    }
+    catch (e) {
+        res.status(500).json({ ok: false, error: e?.message || "clear error" });
     }
 });
 //# sourceMappingURL=index.js.map

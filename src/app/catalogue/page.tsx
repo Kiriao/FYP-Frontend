@@ -8,6 +8,7 @@ import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, MoreHor
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, doc, setDoc, deleteDoc, getDocs, addDoc, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
+import PersonalizeToggle from "../components/PersonalizeToggle";
 
 // ============================================
 // TYPES
@@ -1512,7 +1513,7 @@ export default function DiscoverPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
           <h1 className="text-2xl font-bold">Discover Books & Videos for Kids</h1>
-
+          <PersonalizeToggle />
           <div className="flex items-center gap-3 flex-wrap">
             {interestFilter.isRestricted && interestFilter.hasInterests && (
               <InterestBadge interests={interestFilter.interests} isActive={true} />
