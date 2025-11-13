@@ -71,6 +71,7 @@ export default function Navbar() {
 
   const handleLogout = async () => {
     try {
+      localStorage.removeItem("kidflix_uid");
       await signOut(auth);
       setMobileMenuOpen(false);
       setDropdownOpen(false);

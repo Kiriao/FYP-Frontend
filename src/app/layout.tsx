@@ -5,6 +5,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Analytics } from '@vercel/analytics/next';
 import ClientLayout from "./ClientLayout";
+import GlobalPreviewModalHost from "@/app/components/PreviewModal";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,8 +30,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <ClientLayout>{children} <Analytics />
-</ClientLayout>
+        <ClientLayout>{children} 
+          <Analytics />
+          <GlobalPreviewModalHost />
+      </ClientLayout>
       </body>
     </html>
   );
