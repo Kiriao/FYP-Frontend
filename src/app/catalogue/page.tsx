@@ -98,7 +98,8 @@ interface Activity {
   itemId: string;
   type: 'book' | 'video';
   title: string;
-  action: 'read' | 'watched';
+  action: 'read' | 'watched' | 'viewed';
+  status: 'viewed' | 'completed';
   createdAt: Timestamp;
   thumbnail?: string;
   authors?: string[];
@@ -907,82 +908,89 @@ export default function DiscoverPage() {
   const hasActivity = (itemId: string, type: 'book' | 'video'): boolean => {
     return activities.some(activity => activity.itemId === itemId && activity.type === type);
   };
+  
+  const isCompleted = (itemId: string, type: 'book' | 'video'): boolean => {
+  const activity = activities.find(a => a.itemId === itemId && a.type === type);
+  return activity?.status === 'completed';
+};
 
-  const markAsRead = async (book: Book | ContentItem | NLBBook) => {
-    if (!user) {
-      showToast('Please log in to track your reading activity.', 'warning');
-      return;
-    }
+const markAsRead = async (book: Book | ContentItem | NLBBook) => {
+  if (!user) {
+    showToast('Please log in to track your reading activity.', 'warning');
+    return;
+  }
 
-    if (!canAccessContent('book')) {
-      showToast(getScreenTimeMessage() || 'Content access is restricted.', 'warning');
-      return;
-    }
+  if (!canAccessContent('book')) {
+    showToast(getScreenTimeMessage() || 'Content access is restricted.', 'warning');
+    return;
+  }
 
-    const itemId = getItemId(book);
-    const activityRef = doc(db, 'users', user.uid, 'activities', itemId);
+  const itemId = getItemId(book);
+  const activityRef = doc(db, 'users', user.uid, 'activities', itemId);
 
-    try {
-      const newActivity: Omit<Activity, 'id'> = {
-        userId: user.uid,
-        itemId,
-        type: 'book',
-        title: (book as any).title,
-        action: 'read',
-        createdAt: Timestamp.now(),
-        thumbnail: isNLBBook(book) ? getBookCover(book) : (book as any).thumbnail,
-        authors: isNLBBook(book) ? (book.author ? [book.author] : []) : (book as any).authors
-      };
+  try {
+    const newActivity: Omit<Activity, 'id'> = {
+      userId: user.uid,
+      itemId,
+      type: 'book',
+      title: (book as any).title,
+      action: 'read',
+      status: 'completed', // Mark as completed
+      createdAt: Timestamp.now(),
+      thumbnail: isNLBBook(book) ? getBookCover(book) : (book as any).thumbnail,
+      authors: isNLBBook(book) ? (book.author ? [book.author] : []) : (book as any).authors
+    };
 
-      await setDoc(activityRef, newActivity);
-      const activityWithId: Activity = { ...newActivity, id: itemId };
-      setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === itemId && a.type === 'book'))]);
-      showToast('Marked as read!', 'success');
+    await setDoc(activityRef, newActivity);
+    const activityWithId: Activity = { ...newActivity, id: itemId };
+    setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === itemId && a.type === 'book'))]);
+    showToast('Marked as read!', 'success');
 
-      await endSession(updateUsage);
-    } catch (error) {
-      console.error('Failed to mark book as read:', error);
-      showToast('Failed to track reading activity. Please try again.', 'error');
-    }
-  };
+    await endSession(updateUsage);
+  } catch (error) {
+    console.error('Failed to mark book as read:', error);
+    showToast('Failed to track reading activity. Please try again.', 'error');
+  }
+};
 
-  const markAsWatched = async (video: Video) => {
-    if (!user) {
-      showToast('Please log in to track your viewing activity.', 'warning');
-      return;
-    }
+const markAsWatched = async (video: Video) => {
+  if (!user) {
+    showToast('Please log in to track your viewing activity.', 'warning');
+    return;
+  }
 
-    if (!canAccessContent('video')) {
-      showToast(getScreenTimeMessage() || 'Content access is restricted.', 'warning');
-      return;
-    }
+  if (!canAccessContent('video')) {
+    showToast(getScreenTimeMessage() || 'Content access is restricted.', 'warning');
+    return;
+  }
 
-    const itemId = video.videoId;
-    const activityRef = doc(db, 'users', user.uid, 'activities', itemId);
+  const itemId = video.videoId;
+  const activityRef = doc(db, 'users', user.uid, 'activities', itemId);
 
-    try {
-      const newActivity: Omit<Activity, 'id'> = {
-        userId: user.uid,
-        itemId,
-        type: 'video',
-        title: video.title,
-        action: 'watched',
-        createdAt: Timestamp.now(),
-        thumbnail: video.thumbnail,
-        channel: video.channel
-      };
+  try {
+    const newActivity: Omit<Activity, 'id'> = {
+      userId: user.uid,
+      itemId,
+      type: 'video',
+      title: video.title,
+      action: 'watched',
+      status: 'completed', // Mark as completed
+      createdAt: Timestamp.now(),
+      thumbnail: video.thumbnail,
+      channel: video.channel
+    };
 
-      await setDoc(activityRef, newActivity);
-      const activityWithId: Activity = { ...newActivity, id: itemId };
-      setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === itemId && a.type === 'video'))]);
-      showToast('Marked as watched!', 'success');
+    await setDoc(activityRef, newActivity);
+    const activityWithId: Activity = { ...newActivity, id: itemId };
+    setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === itemId && a.type === 'video'))]);
+    showToast('Marked as watched!', 'success');
 
-      await updateUsage(user.uid, 'video', 5);
-    } catch (error) {
-      console.error('Failed to mark video as watched:', error);
-      showToast('Failed to track viewing activity. Please try again.', 'error');
-    }
-  };
+    await updateUsage(user.uid, 'video', 5);
+  } catch (error) {
+    console.error('Failed to mark video as watched:', error);
+    showToast('Failed to track viewing activity. Please try again.', 'error');
+  }
+};
 
   const removeActivity = async (itemId: string, type: 'book' | 'video') => {
     if (!user) return;
@@ -1134,6 +1142,70 @@ export default function DiscoverPage() {
     }
   };
 
+  const autoMarkAsViewed = async (item: Book | Video | ContentItem | NLBBook) => {
+  if (!user) return;
+
+  const itemType = (mode === 'books' || mode === 'collection-books' || mode === 'nlb') ? 'book' : 'video';
+  
+  if (!canAccessContent(itemType)) {
+    return;
+  }
+
+  const itemId = getItemId(item);
+  
+  // Check if already marked
+  if (hasActivity(itemId, itemType)) {
+    return;
+  }
+
+  const activityRef = doc(db, 'users', user.uid, 'activities', itemId);
+
+  try {
+    // Check if activity exists and update status accordingly
+    const existingActivity = activities.find(a => a.itemId === itemId && a.type === itemType);
+    
+    if (itemType === 'book') {
+      const newActivity: Omit<Activity, 'id'> = {
+        userId: user.uid,
+        itemId,
+        type: 'book',
+        title: (item as any).title,
+        action: 'viewed',
+        status: existingActivity?.status === 'completed' ? 'completed' : 'viewed',
+        createdAt: existingActivity?.createdAt || Timestamp.now(),
+        thumbnail: isNLBBook(item) ? getBookCover(item) : (item as any).thumbnail,
+        authors: isNLBBook(item) ? (item.author ? [item.author] : []) : (item as any).authors
+      };
+
+      await setDoc(activityRef, newActivity, { merge: true });
+      const activityWithId: Activity = { ...newActivity, id: itemId };
+      setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === itemId && a.type === 'book'))]);
+    } else {
+      const video = item as Video;
+      const newActivity: Omit<Activity, 'id'> = {
+        userId: user.uid,
+        itemId,
+        type: 'video',
+        title: video.title,
+        action: 'viewed',
+        status: existingActivity?.status === 'completed' ? 'completed' : 'viewed',
+        createdAt: existingActivity?.createdAt || Timestamp.now(),
+        thumbnail: video.thumbnail,
+        channel: video.channel
+      };
+
+      await setDoc(activityRef, newActivity, { merge: true });
+      const activityWithId: Activity = { ...newActivity, id: itemId };
+      setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === itemId && a.type === 'video'))]);
+      
+      // Update video usage
+      await updateUsage(user.uid, 'video', 5);
+    }
+  } catch (error) {
+    console.error('Failed to auto-mark as viewed:', error);
+  }
+};
+
   // ============================================
   // EVENT HANDLERS
   // ============================================
@@ -1184,17 +1256,22 @@ export default function DiscoverPage() {
     setVideosPage(1);
   };
 
-  const handleContentItemClick = (item: Book | Video | ContentItem | NLBBook) => {
-    const contentType = (mode === 'books' || mode === 'collection-books' || mode === 'nlb') ? 'book' : 'video';
+const handleContentItemClick = async (item: Book | Video | ContentItem | NLBBook) => {
+  const contentType = (mode === 'books' || mode === 'collection-books' || mode === 'nlb') ? 'book' : 'video';
 
-    if (!canAccessContent(contentType)) {
-      showToast(getScreenTimeMessage() || 'Content access is restricted.', 'warning');
-      return;
-    }
+  if (!canAccessContent(contentType)) {
+    showToast(getScreenTimeMessage() || 'Content access is restricted.', 'warning');
+    return;
+  }
 
-    setSelectedItem(item);
-    startSession(contentType);
-  };
+  setSelectedItem(item);
+  startSession(contentType);
+  
+  // Automatically mark as viewed
+  if (user) {
+    await autoMarkAsViewed(item);
+  }
+};
 
   const handleModalClose = async () => {
     await endSession(updateUsage);
@@ -1216,8 +1293,8 @@ export default function DiscoverPage() {
   // ============================================
   // EFFECTS
   // ============================================
-  useEffect(() => {
-  (window as any).openAppModal = (d: any) => {
+useEffect(() => {
+  (window as any).openAppModal = async (d: any) => {
     if (d?.type === "video") {
       const vid =
         d.id ||
@@ -1235,21 +1312,46 @@ export default function DiscoverPage() {
         d.url || (vid ? `https://www.youtube.com/watch?v=${vid}` : "");
 
       const item: any = {
-        // fields your modal uses for videos
         videoId: vid,
         title: d.title || "",
         thumbnail: d.image || "",
-        link: embed,      // used by the iframe inside the modal
-        url: watch,       // “Watch on YouTube” anchor
+        link: embed,
+        url: watch,
         source: d.source || "chat",
+        channel: d.channel || "Unknown",
       };
 
       setSelectedItem(item);
-      setShowPreview(true);   // show the player right away
+      setShowPreview(true);
+      
+      // Auto-mark video as viewed
+      if (user && vid) {
+        const activityRef = doc(db, 'users', user.uid, 'activities', vid);
+        
+        try {
+          const newActivity: Omit<Activity, 'id'> = {
+            userId: user.uid,
+            itemId: vid,
+            type: 'video',
+            title: item.title,
+            action: 'viewed',
+            status: 'viewed',
+            createdAt: Timestamp.now(),
+            thumbnail: item.thumbnail,
+            channel: item.channel
+          };
+
+          await setDoc(activityRef, newActivity, { merge: true });
+          const activityWithId: Activity = { ...newActivity, id: vid };
+          setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === vid && a.type === 'video'))]);
+        } catch (error) {
+          console.error('Failed to auto-mark video as viewed:', error);
+        }
+      }
       return;
     }
 
-    // Book fallback (unchanged)
+    // Book fallback
     const item: any = {
       id: d.id || crypto.randomUUID(),
       title: d.title || "",
@@ -1265,12 +1367,38 @@ export default function DiscoverPage() {
       category: d.category || "",
       age: d.age || "",
     };
+    
     setSelectedItem(item);
     setShowPreview(true);
+    
+    // Auto-mark book as viewed
+    if (user && item.id) {
+      const activityRef = doc(db, 'users', user.uid, 'activities', item.id);
+      
+      try {
+        const newActivity: Omit<Activity, 'id'> = {
+          userId: user.uid,
+          itemId: item.id,
+          type: 'book',
+          title: item.title,
+          action: 'viewed',
+          status: 'viewed',
+          createdAt: Timestamp.now(),
+          thumbnail: item.thumbnail,
+          authors: item.authors
+        };
+
+        await setDoc(activityRef, newActivity, { merge: true });
+        const activityWithId: Activity = { ...newActivity, id: item.id };
+        setActivities(prev => [activityWithId, ...prev.filter(a => !(a.itemId === item.id && a.type === 'book'))]);
+      } catch (error) {
+        console.error('Failed to auto-mark book as viewed:', error);
+      }
+    }
   };
 
   return () => { delete (window as any).openAppModal; };
-}, []);
+}, [user, activities]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -1736,20 +1864,30 @@ export default function DiscoverPage() {
                 return (
                   <div key={book.id} className="group relative border border-gray-200 rounded-xl overflow-hidden hover:shadow-lg transition-all bg-white cursor-pointer" onClick={() => handleContentItemClick(book)}>
                     {hasActivity(book.id, 'book') && (
-                      <div className="absolute top-2 right-2 z-10 bg-green-500 text-white rounded-full p-1.5 shadow-md">
-                        <Check className="w-3 h-3" />
+                      <div className={`absolute top-2 right-2 z-10 rounded-full p-1.5 shadow-md ${
+                        isCompleted(book.id, 'book') ? 'bg-green-500' : 'bg-blue-500'
+                      } text-white`}>
+                        {isCompleted(book.id, 'book') ? (
+                          <Check className="w-3 h-3" />
+                        ) : (
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+                            <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/>
+                          </svg>
+                        )}
                       </div>
                     )}
-                    
                     <div className="relative overflow-hidden bg-gray-100">
                       <img src={book.thumbnail || FALLBACK_THUMB} alt={book.title} className="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-300" />
                       
                       {user && (
                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
                           <div className="absolute bottom-2 left-2 right-2 flex gap-2">
-                            <button onClick={(e) => { e.stopPropagation(); markAsRead(book); }} className="flex-1 bg-white/90 hover:bg-white text-gray-900 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center justify-center gap-1">
+                            <button onClick={(e) => { e.stopPropagation(); markAsRead(book); }} className={`flex-1 bg-white/90 hover:bg-white text-gray-900 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center justify-center gap-1 ${
+                              isCompleted(book.id, 'book') ? 'bg-green-100' : ''
+                            }`}>
                               <BookOpen className="w-3 h-3" />
-                              {hasActivity(book.id, 'book') ? 'Read' : 'Mark Read'}
+                              {isCompleted(book.id, 'book') ? 'Read ✓' : hasActivity(book.id, 'book') ? 'Mark as Read' : 'Mark as Read'}
                             </button>
                             <button onClick={(e) => { e.stopPropagation(); toggleFavourite(book, 'book'); }} className={`bg-white/90 hover:bg-white px-3 py-1.5 rounded-lg ${isFavourite(book.id, 'book') ? 'text-red-500' : 'text-gray-900'}`}>
                               <Heart className={`w-3 h-3 ${isFavourite(book.id, 'book') ? 'fill-current' : ''}`} />
@@ -1777,20 +1915,30 @@ export default function DiscoverPage() {
                 return (
                   <div key={`${video.videoId}-${index}`} className="group relative border border-gray-200 rounded-xl overflow-hidden hover:shadow-lg transition-all bg-white cursor-pointer" onClick={() => handleContentItemClick(video)}>
                     {hasActivity(video.videoId, 'video') && (
-                      <div className="absolute top-2 right-2 z-10 bg-green-500 text-white rounded-full p-1.5 shadow-md">
-                        <Check className="w-3 h-3" />
+                      <div className={`absolute top-2 right-2 z-10 rounded-full p-1.5 shadow-md ${
+                        isCompleted(video.videoId, 'video') ? 'bg-green-500' : 'bg-blue-500'
+                      } text-white`}>
+                        {isCompleted(video.videoId, 'video') ? (
+                          <Check className="w-3 h-3" />
+                        ) : (
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+                            <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/>
+                          </svg>
+                        )}
                       </div>
                     )}
-                    
                     <div className="relative overflow-hidden bg-gray-100">
                       {video.thumbnail && <img src={video.thumbnail} alt={video.title} className="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-300" />}
                       
                       {user && (
                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
                           <div className="absolute bottom-2 left-2 right-2 flex gap-2">
-                            <button onClick={(e) => { e.stopPropagation(); markAsWatched(video); }} className="flex-1 bg-white/90 hover:bg-white text-gray-900 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center justify-center gap-1">
+                            <button onClick={(e) => { e.stopPropagation(); markAsWatched(video); }} className={`flex-1 bg-white/90 hover:bg-white text-gray-900 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center justify-center gap-1 ${
+                              isCompleted(video.videoId, 'video') ? 'bg-green-100' : ''
+                            }`}>
                               <Play className="w-3 h-3" />
-                              {hasActivity(video.videoId, 'video') ? 'Watched' : 'Mark Watched'}
+                              {isCompleted(video.videoId, 'video') ? 'Watched ✓' : hasActivity(video.videoId, 'video') ? 'Mark Watched' : 'Mark Watched'}
                             </button>
                             <button onClick={(e) => { e.stopPropagation(); toggleFavourite(video, 'video'); }} className={`bg-white/90 hover:bg-white px-3 py-1.5 rounded-lg ${isFavourite(video.videoId, 'video') ? 'text-red-500' : 'text-gray-900'}`}>
                               <Heart className={`w-3 h-3 ${isFavourite(video.videoId, 'video') ? 'fill-current' : ''}`} />
