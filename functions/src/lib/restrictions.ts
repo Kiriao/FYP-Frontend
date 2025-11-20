@@ -1,4 +1,17 @@
 // functions/src/lib/restrictions.ts
+
+// Categorized restricted terms
+export const RESTRICTED_TERMS = {
+  violence: ["kill", "murder", "assault", "weapon", "blood", "stab", "shoot", "attack", "fight", "war"],
+  drugs: ["cocaine", "heroin", "meth", "drug", "narcotic", "marijuana", "cannabis"],
+  hate: ["racist", "slur", "discrimination", "hate", "nazi", "supremacist"],
+  explicit: ["explicit", "nsfw", "adult", "sexual", "porn", "nude"],
+  selfharm: ["suicide", "selfharm", "cutting", "overdose", "kill myself"]
+};
+
+// Flatten all categories into one array
+export const ALL_RESTRICTED_TERMS = Object.values(RESTRICTED_TERMS).flat();
+
 export function normalizeForMatch(s: string): string {
   // lowercase + NFC unicode normalize
   let t = s.normalize("NFC").toLowerCase();
@@ -27,16 +40,6 @@ function buildWordBoundaryRegex(terms: string[]): RegExp {
   return new RegExp(pattern, "i");
 }
 
-// export function findRestrictedTerms(input: string, restrictedTerms: string[]): string[] {
-//   const norm = normalizeForMatch(input);
-//   const hits = new Set<string>();
-//   for (const term of restrictedTerms) {
-//     const reSingle = buildWordBoundaryRegex([term]);
-//     if (reSingle.test(norm)) hits.add(term);
-//   }
-//   return Array.from(hits);
-// }
-
 // liberal match: case-insensitive, substring (with basic word-ish boundaries)
 export function findRestrictedTerms(text: string, restricted: string[]): string[] {
   if (!text || !Array.isArray(restricted)) return [];
@@ -56,4 +59,36 @@ export function findRestrictedTerms(text: string, restricted: string[]): string[
 
 function escapeRx(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Check against all restricted terms
+export function checkRestrictions(text: string): string[] {
+  return findRestrictedTerms(text, ALL_RESTRICTED_TERMS);
+}
+
+// Check specific category
+export function checkCategory(text: string, category: keyof typeof RESTRICTED_TERMS): string[] {
+  return findRestrictedTerms(text, RESTRICTED_TERMS[category]);
+}
+
+// Check and return which categories were violated
+export function checkCategoriesViolated(text: string): {
+  violations: string[];
+  categories: string[];
+} {
+  const violations: string[] = [];
+  const categories: string[] = [];
+  
+  for (const [category, terms] of Object.entries(RESTRICTED_TERMS)) {
+    const hits = findRestrictedTerms(text, terms);
+    if (hits.length > 0) {
+      violations.push(...hits);
+      categories.push(category);
+    }
+  }
+  
+  return {
+    violations: [...new Set(violations)], // remove duplicates
+    categories: [...new Set(categories)]
+  };
 }
