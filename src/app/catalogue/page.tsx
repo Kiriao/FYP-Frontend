@@ -909,7 +909,7 @@ export default function DiscoverPage() {
     return activities.some(activity => activity.itemId === itemId && activity.type === type);
   };
   
-  const isCompleted = (itemId: string, type: 'book' | 'video'): boolean => {
+const isCompleted = (itemId: string, type: 'book' | 'video'): boolean => {
   const activity = activities.find(a => a.itemId === itemId && a.type === type);
   return activity?.status === 'completed';
 };
@@ -1142,7 +1142,7 @@ const markAsWatched = async (video: Video) => {
     }
   };
 
-  const autoMarkAsViewed = async (item: Book | Video | ContentItem | NLBBook) => {
+const autoMarkAsViewed = async (item: Book | Video | ContentItem | NLBBook) => {
   if (!user) return;
 
   const itemType = (mode === 'books' || mode === 'collection-books' || mode === 'nlb') ? 'book' : 'video';
@@ -1682,9 +1682,21 @@ useEffect(() => {
                           {activity.type === 'book' ? activity.authors?.join(', ') || 'Unknown author' : activity.channel}
                         </p>
                         <div className="flex items-center justify-between mt-2">
-                          <span className="text-xs text-green-600 flex items-center gap-1">
-                            <Check className="w-3 h-3" />
-                            {activity.action === 'read' ? 'Read' : 'Watched'}
+                          <span className={`text-xs flex items-center gap-1 ${
+                            activity.status === 'completed' ? 'text-green-600' : 'text-blue-600'
+                          }`}>
+                            {activity.status === 'completed' ? (
+                              <Check className="w-3 h-3" />
+                            ) : (
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+                                <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/>
+                              </svg>
+                            )}
+                            {activity.status === 'completed' 
+                              ? (activity.type === 'book' ? 'Read' : 'Watched')
+                              : 'Viewed'
+                            }
                           </span>
                           <button onClick={() => removeActivity(activity.itemId, activity.type)} className="text-xs text-red-500 hover:text-red-700">
                             Remove
@@ -1887,7 +1899,7 @@ useEffect(() => {
                               isCompleted(book.id, 'book') ? 'bg-green-100' : ''
                             }`}>
                               <BookOpen className="w-3 h-3" />
-                              {isCompleted(book.id, 'book') ? 'Read ✓' : hasActivity(book.id, 'book') ? 'Mark as Read' : 'Mark as Read'}
+                              {isCompleted(book.id, 'book') ? 'Read ✓' : 'Mark as Read'}
                             </button>
                             <button onClick={(e) => { e.stopPropagation(); toggleFavourite(book, 'book'); }} className={`bg-white/90 hover:bg-white px-3 py-1.5 rounded-lg ${isFavourite(book.id, 'book') ? 'text-red-500' : 'text-gray-900'}`}>
                               <Heart className={`w-3 h-3 ${isFavourite(book.id, 'book') ? 'fill-current' : ''}`} />
@@ -1938,7 +1950,7 @@ useEffect(() => {
                               isCompleted(video.videoId, 'video') ? 'bg-green-100' : ''
                             }`}>
                               <Play className="w-3 h-3" />
-                              {isCompleted(video.videoId, 'video') ? 'Watched ✓' : hasActivity(video.videoId, 'video') ? 'Mark Watched' : 'Mark Watched'}
+                              {isCompleted(video.videoId, 'video') ? 'Watched ✓' : 'Mark Watched'}
                             </button>
                             <button onClick={(e) => { e.stopPropagation(); toggleFavourite(video, 'video'); }} className={`bg-white/90 hover:bg-white px-3 py-1.5 rounded-lg ${isFavourite(video.videoId, 'video') ? 'text-red-500' : 'text-gray-900'}`}>
                               <Heart className={`w-3 h-3 ${isFavourite(video.videoId, 'video') ? 'fill-current' : ''}`} />
@@ -1970,9 +1982,11 @@ useEffect(() => {
                       {user && mode === 'collection-books' && (
                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
                           <div className="absolute bottom-2 left-2 right-2 flex gap-2">
-                            <button onClick={(e) => { e.stopPropagation(); markAsRead(contentItem); }} className="flex-1 bg-white/90 hover:bg-white text-gray-900 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center justify-center gap-1">
+                            <button onClick={(e) => { e.stopPropagation(); markAsRead(contentItem); }} className={`flex-1 bg-white/90 hover:bg-white text-gray-900 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center justify-center gap-1 ${
+                              isCompleted(contentItem.id, 'book') ? 'bg-green-100' : ''
+                            }`}>
                               <BookOpen className="w-3 h-3" />
-                              {hasActivity(contentItem.id, 'book') ? 'Read' : 'Mark Read'}
+                              {isCompleted(contentItem.id, 'book') ? 'Read ✓' : 'Mark as Read'}
                             </button>
                             <button onClick={(e) => { e.stopPropagation(); toggleFavourite(contentItem, 'book'); }} className={`bg-white/90 hover:bg-white px-3 py-1.5 rounded-lg ${isFavourite(contentItem.id, 'book') ? 'text-red-500' : 'text-gray-900'}`}>
                               <Heart className={`w-3 h-3 ${isFavourite(contentItem.id, 'book') ? 'fill-current' : ''}`} />
@@ -2079,9 +2093,20 @@ useEffect(() => {
                     )}
 
                     {hasActivity(getItemId(selectedItem), 'book') && (
-                      <div className="mt-2 inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
-                        <Check className="w-3 h-3" />
-                        Read
+                      <div className={`mt-2 inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full ${
+                        isCompleted(getItemId(selectedItem), 'book')
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-blue-100 text-blue-700'
+                      }`}>
+                        {isCompleted(getItemId(selectedItem), 'book') ? (
+                          <Check className="w-3 h-3" />
+                        ) : (
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+                            <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/>
+                          </svg>
+                        )}
+                        {isCompleted(getItemId(selectedItem), 'book') ? 'Read' : 'Viewed'}
                       </div>
                     )}
                   </div>
@@ -2221,13 +2246,28 @@ useEffect(() => {
                     {(selectedItem as any).authors?.length && <p className="text-xs text-gray-600">{(selectedItem as any).authors.join(', ')}</p>}
                     {isBook(selectedItem) && selectedItem.categories?.length && <p className="text-[11px] text-gray-500 mt-1">{selectedItem.categories.join(', ')}</p>}
                     {isContentItem(selectedItem) && selectedItem.categories?.length && <p className="text-[11px] text-gray-500 mt-1">{selectedItem.categories.join(', ')}</p>}
-
-                    {((isBook(selectedItem) && hasActivity(selectedItem.id, 'book')) || (isContentItem(selectedItem) && hasActivity(selectedItem.id, 'book'))) && (
-                      <div className="mt-2 inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
-                        <Check className="w-3 h-3" />
-                        Read
-                      </div>
-                    )}
+                      {((isBook(selectedItem) && hasActivity(selectedItem.id, 'book')) || (isContentItem(selectedItem) && hasActivity(selectedItem.id, 'book'))) && (
+                        <div className={`mt-2 inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full ${
+                          (isBook(selectedItem) && isCompleted(selectedItem.id, 'book')) || 
+                          (isContentItem(selectedItem) && isCompleted(selectedItem.id, 'book'))
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-blue-100 text-blue-700'
+                        }`}>
+                          {((isBook(selectedItem) && isCompleted(selectedItem.id, 'book')) || 
+                            (isContentItem(selectedItem) && isCompleted(selectedItem.id, 'book'))) ? (
+                            <Check className="w-3 h-3" />
+                          ) : (
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+                              <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/>
+                            </svg>
+                          )}
+                          {((isBook(selectedItem) && isCompleted(selectedItem.id, 'book')) || 
+                            (isContentItem(selectedItem) && isCompleted(selectedItem.id, 'book')))
+                            ? 'Read' : 'Viewed'
+                          }
+                        </div>
+                      )}
                   </div>
                 </div>
 
@@ -2330,12 +2370,23 @@ useEffect(() => {
                   <div className="text-gray-700">
                     {selectedItem.channel && <span className="font-medium text-gray-900">{selectedItem.channel}</span>}
                     {selectedItem.publishedAt && <span className="ml-2 text-gray-500">• {fmtDate(selectedItem.publishedAt)}</span>}
-                    {hasActivity(selectedItem.videoId, 'video') && (
-                      <div className="ml-2 inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
-                        <Check className="w-3 h-3" />
-                        Watched
-                      </div>
-                    )}
+                      {hasActivity(selectedItem.videoId, 'video') && (
+                        <div className={`ml-2 inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full ${
+                          isCompleted(selectedItem.videoId, 'video')
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-blue-100 text-blue-700'
+                        }`}>
+                          {isCompleted(selectedItem.videoId, 'video') ? (
+                            <Check className="w-3 h-3" />
+                          ) : (
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+                              <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/>
+                            </svg>
+                          )}
+                          {isCompleted(selectedItem.videoId, 'video') ? 'Watched' : 'Viewed'}
+                        </div>
+                      )}
                   </div>
                   <span className="px-2 py-0.5 rounded-full border border-gray-200 bg-gray-50 text-xs">{videoBucketDisplayNames[videoBucket]}</span>
                 </div>

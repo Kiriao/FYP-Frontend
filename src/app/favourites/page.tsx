@@ -14,7 +14,7 @@ import {
   orderBy,
   Timestamp,
 } from "firebase/firestore";
-import { BookOpen, Play, Check, Trash2, Search, Filter, Calendar, TrendingUp, Award, Clock } from "lucide-react";
+import { BookOpen, Play, Check, Trash2, Search, Filter, Calendar, TrendingUp, Award, Clock, Eye } from "lucide-react";
 
 interface Favourite {
   id: string;
@@ -32,7 +32,8 @@ interface Activity {
   itemId: string;
   type: 'book' | 'video';
   title: string;
-  action: 'read' | 'watched';
+  action: 'read' | 'watched' | 'viewed';
+  status: 'viewed' | 'completed';
   createdAt: Timestamp;
   thumbnail?: string;
   authors?: string[];
@@ -56,6 +57,7 @@ export default function FavouritesPage() {
   const [subMode, setSubMode] = useState<"books" | "videos">("books");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterPeriod, setFilterPeriod] = useState<"all" | "week" | "month" | "year">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "viewed">("all");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -163,6 +165,11 @@ export default function FavouritesPage() {
   const getFilteredActivities = () => {
     let filtered = activities;
 
+    // Filter by status
+    if (statusFilter !== "all") {
+      filtered = filtered.filter(a => a.status === statusFilter);
+    }
+
     // Filter by period
     if (filterPeriod !== "all") {
       const now = new Date();
@@ -211,6 +218,10 @@ export default function FavouritesPage() {
   const getStats = () => {
     const totalBooks = activities.filter(a => a.type === "book").length;
     const totalVideos = activities.filter(a => a.type === "video").length;
+    const completedBooks = activities.filter(a => a.type === "book" && a.status === "completed").length;
+    const completedVideos = activities.filter(a => a.type === "video" && a.status === "completed").length;
+    const viewedBooks = activities.filter(a => a.type === "book" && a.status === "viewed").length;
+    const viewedVideos = activities.filter(a => a.type === "video" && a.status === "viewed").length;
     
     const thisWeek = activities.filter(a => {
       const weekAgo = new Date();
@@ -218,7 +229,15 @@ export default function FavouritesPage() {
       return a.createdAt.toDate() >= weekAgo;
     }).length;
 
-    return { totalBooks, totalVideos, thisWeek };
+    return { 
+      totalBooks, 
+      totalVideos, 
+      completedBooks, 
+      completedVideos,
+      viewedBooks,
+      viewedVideos,
+      thisWeek 
+    };
   };
 
   const formatDate = (timestamp: Timestamp) => {
@@ -234,6 +253,24 @@ export default function FavouritesPage() {
   const getSelectedPersonName = () => {
     const selected = children.find(c => c.id === selectedId);
     return selected?.fullName || "Unknown";
+  };
+
+  const getActivityStatusBadge = (activity: Activity) => {
+    if (activity.status === 'completed') {
+      return (
+        <span className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded-full flex items-center gap-1 font-medium">
+          <Check className="w-3 h-3" />
+          {activity.type === 'book' ? 'Read' : 'Watched'}
+        </span>
+      );
+    } else {
+      return (
+        <span className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-full flex items-center gap-1 font-medium">
+          <Eye className="w-3 h-3" />
+          Viewed
+        </span>
+      );
+    }
   };
 
   if (!user) {
@@ -265,15 +302,18 @@ export default function FavouritesPage() {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
             <div className="flex items-center gap-3">
               <div className="p-3 bg-blue-100 rounded-lg">
                 <BookOpen className="w-6 h-6 text-blue-600" />
               </div>
               <div>
-                <p className="text-sm text-gray-600">Books Read</p>
+                <p className="text-sm text-gray-600">Books</p>
                 <p className="text-2xl font-bold text-gray-900">{stats.totalBooks}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {stats.completedBooks} read · {stats.viewedBooks} viewed
+                </p>
               </div>
             </div>
           </div>
@@ -284,8 +324,11 @@ export default function FavouritesPage() {
                 <Play className="w-6 h-6 text-purple-600" />
               </div>
               <div>
-                <p className="text-sm text-gray-600">Videos Watched</p>
+                <p className="text-sm text-gray-600">Videos</p>
                 <p className="text-2xl font-bold text-gray-900">{stats.totalVideos}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {stats.completedVideos} watched · {stats.viewedVideos} viewed
+                </p>
               </div>
             </div>
           </div>
@@ -298,6 +341,18 @@ export default function FavouritesPage() {
               <div>
                 <p className="text-sm text-gray-600">This Week</p>
                 <p className="text-2xl font-bold text-gray-900">{stats.thisWeek}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-orange-100 rounded-lg">
+                <Award className="w-6 h-6 text-orange-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-600">Favourites</p>
+                <p className="text-2xl font-bold text-gray-900">{favourites.length}</p>
               </div>
             </div>
           </div>
@@ -338,19 +393,33 @@ export default function FavouritesPage() {
             </div>
             
             {mainMode === "activity" && (
-              <div className="flex items-center gap-2">
-                <Filter className="w-5 h-5 text-gray-400" />
-                <select
-                  value={filterPeriod}
-                  onChange={(e) => setFilterPeriod(e.target.value as any)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="all">All Time</option>
-                  <option value="week">Past Week</option>
-                  <option value="month">Past Month</option>
-                  <option value="year">Past Year</option>
-                </select>
-              </div>
+              <>
+                <div className="flex items-center gap-2">
+                  <Filter className="w-5 h-5 text-gray-400" />
+                  <select
+                    value={filterPeriod}
+                    onChange={(e) => setFilterPeriod(e.target.value as any)}
+                    className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="all">All Time</option>
+                    <option value="week">Past Week</option>
+                    <option value="month">Past Month</option>
+                    <option value="year">Past Year</option>
+                  </select>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as any)}
+                    className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="completed">Completed</option>
+                    <option value="viewed">Viewed Only</option>
+                  </select>
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -520,8 +589,8 @@ export default function FavouritesPage() {
               bookActivities.length === 0 ? (
                 <div className="text-center py-16 bg-white rounded-2xl shadow-sm border border-gray-100">
                   <BookOpen className="w-20 h-20 mx-auto mb-4 text-gray-300" />
-                  <p className="text-lg text-gray-600 mb-2">No books read yet</p>
-                  <p className="text-sm text-gray-500">Books marked as read will appear here</p>
+                  <p className="text-lg text-gray-600 mb-2">No book activity yet</p>
+                  <p className="text-sm text-gray-500">Books that have been read or viewed will appear here</p>
                 </div>
               ) : (
                 <div className="space-y-5">
@@ -549,10 +618,7 @@ export default function FavouritesPage() {
                               {activity.authors?.join(', ') || 'Unknown author'}
                             </p>
                             <div className="flex items-center gap-2 mb-3">
-                              <span className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded-full flex items-center gap-1 font-medium">
-                                <Check className="w-3 h-3" />
-                                Read
-                              </span>
+                              {getActivityStatusBadge(activity)}
                             </div>
                             <div className="flex items-center gap-1 text-xs text-gray-500 mb-3">
                               <Calendar className="w-3 h-3" />
@@ -575,8 +641,8 @@ export default function FavouritesPage() {
             ) : videoActivities.length === 0 ? (
               <div className="text-center py-16 bg-white rounded-2xl shadow-sm border border-gray-100">
                 <Play className="w-20 h-20 mx-auto mb-4 text-gray-300" />
-                <p className="text-lg text-gray-600 mb-2">No videos watched yet</p>
-                <p className="text-sm text-gray-500">Videos marked as watched will appear here</p>
+                <p className="text-lg text-gray-600 mb-2">No video activity yet</p>
+                <p className="text-sm text-gray-500">Videos that have been watched or viewed will appear here</p>
               </div>
             ) : (
               <div className="space-y-5">
@@ -604,10 +670,7 @@ export default function FavouritesPage() {
                             {activity.channel || 'Unknown channel'}
                           </p>
                           <div className="flex items-center gap-2 mb-3">
-                            <span className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded-full flex items-center gap-1 font-medium">
-                              <Check className="w-3 h-3" />
-                              Watched
-                            </span>
+                            {getActivityStatusBadge(activity)}
                           </div>
                           <div className="flex items-center gap-1 text-xs text-gray-500 mb-3">
                             <Calendar className="w-3 h-3" />
