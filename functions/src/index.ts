@@ -857,15 +857,22 @@ const freeVideoQuery =
 /* ----------- safety & restrictions (runs whenever userId or text) ----------- */
 try {
   if (rawUtterance) {
-    let role = "child";
-
-    // Start with default preset restrictions (always on)
+    // Start with default preset restrictions (always on for everyone)
     let userSpecific: string[] = [];
+    let role = "child"; // default to most restrictive
+
     if (userId) {
-      const userSnap = await db.collection("users").doc(userId).get();
-      role = (userSnap.get("role") as string) || "child";
-      const r = userSnap.get("restrictions");
-      userSpecific = Array.isArray(r) ? r : [];
+      try {
+        const userSnap = await db.collection("users").doc(userId).get();
+        if (userSnap.exists) {
+          role = (userSnap.get("role") as string) || "child";
+          const r = userSnap.get("restrictions");
+          userSpecific = Array.isArray(r) ? r : [];
+        }
+      } catch (userErr) {
+        logger.warn("USER_FETCH_ERR", String(userErr));
+        // keep role as "child" (most restrictive)
+      }
     }
 
     // Merge defaults + user/parent-configured restrictions
@@ -887,23 +894,27 @@ try {
       role,
       restrictionCount: mergedRestrictions.length,
       sampleText: rawUtterance.slice(0, 60),
-      sampleHits: hits.slice(0, 3),
+      hitsFound: hits.length,
+      sampleHits: hits.slice(0, 5),
     });
 
-    if (role === "child" && hits.length) {
+    // Block for children OR if no userId (anonymous users = treat as child)
+    if ((role === "child" || !userId) && hits.length) {
       if (userId) {
         await db.collection("safety_logs").add({
           userId,
           hits,
           ts: new Date(),
           messagePreview: rawUtterance.slice(0, 160),
-          source: "preset+user",   // helpful for debugging later
+          source: "preset+user",
         });
       }
 
+      logger.warn("GUARD_BLOCKED", { hits, preview: rawUtterance.slice(0, 60) });
+
       reply(
         res,
-        "Hey there! I can’t help with that topic. Want to explore fun science books, animal stories, or math videos instead? 🐼🚀📚",
+        "Hey there! I can't help with that topic. Want to explore fun science books, animal stories, or math videos instead? 🐼🚀📚",
         { algo_used: "guard_block" }
       );
       return;
@@ -911,7 +922,7 @@ try {
   }
 } catch (e) {
   logger.warn("moderation guard error", String(e));
-  // fail-open (but still protected by books/videos filters + APIs' own safety)
+  // fail-open but log it
 }
 
     // convenience: kind from intent
