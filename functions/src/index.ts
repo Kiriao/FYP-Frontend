@@ -1966,6 +1966,69 @@ if (preferPersonal && (!seed || !seed.trim() || blockAnn) && categoryOrTopic) {
       }
 
       const haveFree = !!bookPath;
+
+            // --- EXTRA SAFETY GUARD: block restricted topics for books (child role) ---
+      try {
+        let role = "child";
+        let userSpecific: string[] = [];
+
+        if (userId) {
+          const snap = await db.collection("users").doc(userId).get();
+          role = (snap.get("role") as string) || "child";
+          const r = snap.get("restrictions");
+          if (Array.isArray(r)) userSpecific = r;
+        }
+
+        const parts: string[] = [];
+
+        // what the kid actually typed
+        if (rawUtterance) parts.push(rawUtterance);
+
+        // book-related query bits
+        if (freeBookQuery) parts.push(freeBookQuery);
+        if (rawBook) parts.push(rawBook);
+        if (bookCanon) parts.push(bookCanon);
+        if (params?.category) parts.push(String(params.category));
+
+        const searchText = parts
+          .map(t => String(t || "").toLowerCase().trim())
+          .filter(Boolean)
+          .join(" ")
+          .slice(0, 500);
+
+        if (role === "child" && searchText) {
+          const mergedRestrictions = Array.from(
+            new Set(
+              [...DEFAULT_RESTRICTED_TERMS, ...userSpecific]
+                .map(s => String(s).toLowerCase().trim())
+                .filter(Boolean),
+            ),
+          );
+
+          // simple substring match on all restricted terms
+          const hits = mergedRestrictions.filter(term => term && searchText.includes(term));
+
+          if (hits.length > 0) {
+            logger.info("GUARD_BLOCK_BOOKS", {
+              userId: userId || null,
+              role,
+              searchTextSample: searchText.slice(0, 120),
+              sampleHits: hits.slice(0, 5),
+            });
+
+            reply(
+              res,
+              "I can’t help with that topic. Try asking for animals, science, mystery or other fun kids’ books instead! 🐼🚀📚",
+              { algo_used: "guard_block" },
+            );
+            return;
+          }
+        }
+      } catch (e) {
+        logger.warn("BOOK_GUARD_ERROR", String(e));
+      }
+      // --- END EXTRA SAFETY GUARD ---
+
       if (!bookCanon && !haveFree) {
         reply(res, PROMPT_BOOKS, { algo_used: "category_prompt", mode });
         return;
