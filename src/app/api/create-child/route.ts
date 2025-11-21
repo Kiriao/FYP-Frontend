@@ -4,6 +4,7 @@ import { initializeApp, cert, getApps, getApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import nodemailer from "nodemailer";
+import { DEFAULT_RESTRICTED_TERMS } from "@/lib/defaultRestrictions";
 
 // This ensures the route is dynamic and not pre-rendered at build time
 export const dynamic = 'force-dynamic';
@@ -67,7 +68,7 @@ export async function POST(req: NextRequest) {
       plan: "Free Plan",
       role: "child",
       parentId,
-      restrictions: [],
+      restrictions: DEFAULT_RESTRICTED_TERMS,
       createdAt: new Date().toISOString(),
     });
 
