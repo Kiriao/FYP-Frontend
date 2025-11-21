@@ -891,12 +891,27 @@ try {
   // collect all user-facing text we might route on
   const textsToScan: string[] = [];
 
+  // 1) main utterance & generic free queries
   if (rawUtterance) textsToScan.push(rawUtterance);
   if (params?.q) textsToScan.push(String(params.q));
   if (params?.query) textsToScan.push(String(params.query));
   if (params?.free_query) textsToScan.push(String(params.free_query));
   if (params?.book_query) textsToScan.push(String(params.book_query));
   if (params?.video_query) textsToScan.push(String(params.video_query));
+
+  // 2) domain-specific params where topics often live
+  if (params?.genre) textsToScan.push(String(params.genre));
+  if (params?.genre_video) textsToScan.push(String(params.genre_video));
+  if (params?.category) textsToScan.push(String(params.category));
+  if (params?.topic) textsToScan.push(String(params.topic));
+
+  // 3) also include the normalized genres derived earlier
+  if (rawBook) textsToScan.push(String(rawBook));
+  if (rawVideo) textsToScan.push(String(rawVideo));
+
+  // 4) (optional) tag name, just in case you ever encode topics in tags
+  if (rawTag) textsToScan.push(String(rawTag));
+  if (tagKey) textsToScan.push(String(tagKey));
 
   const scanText = textsToScan
     .map(t => String(t || "").trim())
