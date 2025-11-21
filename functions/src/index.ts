@@ -628,6 +628,18 @@ async function fetchVideosByTopic(
 
 /* ------------------------------ CX reply shim ------------------------------ */
 function reply(res: any, text: string, extras: Record<string, any> = {}, payload?: any) {
+
+    try {
+    if (res.headersSent) {
+      try {
+        logger.warn("REPLY_SKIPPED_HEADERS_SENT", {
+          preview: String(text || "").slice(0, 80),
+        });
+      } catch {}
+      return;
+    }
+  } catch {}
+
   try { res.setHeader?.("Content-Type", "application/json"); } catch {}
 
   // --- persist per user+session ---
@@ -746,6 +758,26 @@ const addForKids = (s: string) => (/\bfor\s+kids\b/i.test(s) ? s : `${s} for kid
 export const cxWebhook = onRequest(
   { region: "asia-southeast1", memory: "512MiB", timeoutSeconds: 120 },
   async (req, res) => {
+
+    const SOFT_TIMEOUT_MS = 15000; // 15s < Dialogflow CX 20s
+
+    const timeoutHandle = setTimeout(() => {
+      try {
+        if (!res.headersSent) {
+          logger.warn("CX_SOFT_TIMEOUT", { ms: SOFT_TIMEOUT_MS });
+
+          reply(
+            res,
+            "Hmm, I’m taking a bit longer than usual. Could you please try asking that again?",
+            { algo_used: "soft_timeout" }
+          );
+        }
+      } catch (e) {
+        logger.warn("CX_SOFT_TIMEOUT_HANDLER_ERR", String(e));
+      }
+    }, SOFT_TIMEOUT_MS);
+
+    try {
     const rawTag = req.body?.fulfillmentInfo?.tag ?? "";
     const tagKey = normTag(rawTag);
     const body = req.body || {};
@@ -854,67 +886,82 @@ const freeVideoQuery =
     const ageGroup = params.age_group || mapAgeToGroup(rawAge);
     const lang = String(params.language ?? "en");
 
-/* ----------- safety & restrictions (runs whenever userId or text) ----------- */
+/* ----------- safety & restrictions (runs whenever there is text) ----------- */
 try {
-  if (rawUtterance) {
-    // Start with default preset restrictions (always on for everyone)
+  // collect all user-facing text we might route on
+  const textsToScan: string[] = [];
+
+  if (rawUtterance) textsToScan.push(rawUtterance);
+  if (params?.q) textsToScan.push(String(params.q));
+  if (params?.query) textsToScan.push(String(params.query));
+  if (params?.free_query) textsToScan.push(String(params.free_query));
+  if (params?.book_query) textsToScan.push(String(params.book_query));
+  if (params?.video_query) textsToScan.push(String(params.video_query));
+
+  const scanText = textsToScan
+    .map(t => String(t || "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 500); // avoid scanning huge blobs
+
+  if (scanText) {
+    let role = "child";
+
+    // Default preset restrictions (always on)
     let userSpecific: string[] = [];
-    let role = "child"; // default to most restrictive
 
     if (userId) {
-      try {
-        const userSnap = await db.collection("users").doc(userId).get();
-        if (userSnap.exists) {
-          role = (userSnap.get("role") as string) || "child";
-          const r = userSnap.get("restrictions");
-          userSpecific = Array.isArray(r) ? r : [];
-        }
-      } catch (userErr) {
-        logger.warn("USER_FETCH_ERR", String(userErr));
-        // keep role as "child" (most restrictive)
-      }
+      const userSnap = await db.collection("users").doc(userId).get();
+      role = (userSnap.get("role") as string) || "child";
+
+      // restrictions[] field on users/{userId}
+      const r = userSnap.get("restrictions");
+      if (Array.isArray(r)) userSpecific = r;
+
+      // OPTIONAL: if you already have a separate Firestore collection
+      // for restrictions, merge it too (uncomment and adjust collection name):
+      //
+      // const presetSnap = await db.collection("restrictions").doc(userId).get();
+      // const extra = presetSnap.get("terms");
+      // if (Array.isArray(extra)) userSpecific.push(...extra);
     }
 
-    // Merge defaults + user/parent-configured restrictions
+    // Merge default preset + Firestore restrictions
     const mergedRestrictions = Array.from(
       new Set(
         [
           ...DEFAULT_RESTRICTED_TERMS,
-          ...userSpecific
+          ...userSpecific,
         ]
           .map(s => String(s).toLowerCase().trim())
           .filter(Boolean)
       )
     );
 
-    const hits = findRestrictedTerms(rawUtterance, mergedRestrictions);
+    const hits = findRestrictedTerms(scanText, mergedRestrictions);
 
     logger.info("GUARD_CHECK", {
       userId: userId || null,
       role,
       restrictionCount: mergedRestrictions.length,
-      sampleText: rawUtterance.slice(0, 60),
-      hitsFound: hits.length,
-      sampleHits: hits.slice(0, 5),
+      sampleText: scanText.slice(0, 60),
+      sampleHits: hits.slice(0, 3),
     });
 
-    // Block for children OR if no userId (anonymous users = treat as child)
-    if ((role === "child" || !userId) && hits.length) {
+    if (role === "child" && hits.length) {
       if (userId) {
         await db.collection("safety_logs").add({
           userId,
           hits,
           ts: new Date(),
-          messagePreview: rawUtterance.slice(0, 160),
-          source: "preset+user",
+          messagePreview: scanText.slice(0, 160),
+          source: "preset+user",   // helpful for debugging later
         });
       }
 
-      logger.warn("GUARD_BLOCKED", { hits, preview: rawUtterance.slice(0, 60) });
-
       reply(
         res,
-        "Hey there! I can't help with that topic. Want to explore fun science books, animal stories, or math videos instead? 🐼🚀📚",
+        "Hey there! I can’t help with that topic. Want to explore fun science books, animal stories, or math videos instead? 🐼🚀📚",
         { algo_used: "guard_block" }
       );
       return;
@@ -922,7 +969,7 @@ try {
   }
 } catch (e) {
   logger.warn("moderation guard error", String(e));
-  // fail-open but log it
+  // fail-open (still have API-level safety and kid-friendly queries)
 }
 
     // convenience: kind from intent
@@ -2099,7 +2146,10 @@ if (preferPersonal && (!seed || !seed.trim() || blockAnn) && categoryOrTopic) {
 
     // default welcome
     reply(res, WELCOME_LINE, { algo_used: "welcome", mode });
+  } finally {
+    clearTimeout(timeoutHandle);
   }
+}
 );
 
 /* =================== EMBEDDING + ANN (Postgres + pgvector) =================== */
