@@ -24,63 +24,6 @@ const RECOMMENDER_URL =
   process.env.RECOMMENDER_URL ||
   "https://asia-southeast1-kidflix-4cda0.cloudfunctions.net/recommendForUser";
 
-// --------- Default safety blocklist (applies to all child chats) ---------
-const DEFAULT_RESTRICTED_TERMS: string[] = [
-  "sex",
-  "sexual",
-  "porn",
-  "porno",
-  "pornography",
-  "xxx",
-  "naked",
-  "nudity",
-  "erotic",
-  "bdsm",
-  "fetish",
-  "rape",
-  "rapist",
-  "nsfw",
-  "18+",
-  "adult content",
-  "strip",
-  "stripping",
-
-  "gun",
-  "guns",
-  "weapon",
-  "weapons",
-  "shooting",
-  "rifle",
-  "pistol",
-  "shotgun",
-  "bomb",
-  "explosive",
-
-  "murder",
-  "killer",
-  "killing",
-  "homicide",
-  "gore",
-  "gory",
-  "torture",
-  "beheading",
-
-  "drug",
-  "drugs",
-  "cocaine",
-  "heroin",
-  "meth",
-  "ecstasy",
-  "weed",
-  "marijuana",
-
-  "gang",
-  "gangs",
-  "gangster",
-  "mafia",
-  "cartel"
-];
-
 /* -------------------------------- helpers --------------------------------- */
 function isKnownGenreTerm(s?: string) {
   if (!s) return false;
@@ -628,18 +571,6 @@ async function fetchVideosByTopic(
 
 /* ------------------------------ CX reply shim ------------------------------ */
 function reply(res: any, text: string, extras: Record<string, any> = {}, payload?: any) {
-
-    try {
-    if (res.headersSent) {
-      try {
-        logger.warn("REPLY_SKIPPED_HEADERS_SENT", {
-          preview: String(text || "").slice(0, 80),
-        });
-      } catch {}
-      return;
-    }
-  } catch {}
-
   try { res.setHeader?.("Content-Type", "application/json"); } catch {}
 
   // --- persist per user+session ---
@@ -652,11 +583,6 @@ function reply(res: any, text: string, extras: Record<string, any> = {}, payload
     typeof (extras as any).userId === "string" && (extras as any).userId
     ? (extras as any).userId
     : ((globalThis as any).__kidflix_userId as string | null) || undefined;
-
-    const extrasWithUser: Record<string, any> = { ...extras };
-    if (resolvedUserId) {
-      extrasWithUser.userId = resolvedUserId;
-    }
 
     // choose what we store (keep it small)
     const toStore: Record<string, any> = {
@@ -679,18 +605,7 @@ function reply(res: any, text: string, extras: Record<string, any> = {}, payload
 
     // fire & forget
     saveThreadState(u, sessionId, pruned).catch(() => {});
-
-    const messages: any[] = [{ text: { text: [text] } }];
-    if (payload) messages.push({ payload });
-
-    res.status(200).json({
-      fulfillment_response: { messages },
-      sessionInfo: { parameters: extrasWithUser }
-    });
-    return;
-  } catch (e) {
-    logger.warn("REPLY_STATE_ERR", String(e));
-  }
+  } catch {}
 
   const messages: any[] = [{ text: { text: [text] } }];
   if (payload) messages.push({ payload });
@@ -774,26 +689,6 @@ const addForKids = (s: string) => (/\bfor\s+kids\b/i.test(s) ? s : `${s} for kid
 export const cxWebhook = onRequest(
   { region: "asia-southeast1", memory: "512MiB", timeoutSeconds: 120 },
   async (req, res) => {
-
-    const SOFT_TIMEOUT_MS = 15000; // 15s < Dialogflow CX 20s
-
-    const timeoutHandle = setTimeout(() => {
-      try {
-        if (!res.headersSent) {
-          logger.warn("CX_SOFT_TIMEOUT", { ms: SOFT_TIMEOUT_MS });
-
-          reply(
-            res,
-            "Hmm, I’m taking a bit longer than usual. Could you please try asking that again?",
-            { algo_used: "soft_timeout" }
-          );
-        }
-      } catch (e) {
-        logger.warn("CX_SOFT_TIMEOUT_HANDLER_ERR", String(e));
-      }
-    }, SOFT_TIMEOUT_MS);
-
-    try {
     const rawTag = req.body?.fulfillmentInfo?.tag ?? "";
     const tagKey = normTag(rawTag);
     const body = req.body || {};
@@ -902,106 +797,37 @@ const freeVideoQuery =
     const ageGroup = params.age_group || mapAgeToGroup(rawAge);
     const lang = String(params.language ?? "en");
 
-/* ----------- safety & restrictions (runs whenever there is text) ----------- */
-try {
-  // collect all user-facing text we might route on
-  const textsToScan: string[] = [];
-
-  // 1) main utterance & generic free queries
-  if (rawUtterance) textsToScan.push(rawUtterance);
-  if (params?.q) textsToScan.push(String(params.q));
-  if (params?.query) textsToScan.push(String(params.query));
-  if (params?.free_query) textsToScan.push(String(params.free_query));
-  if (params?.book_query) textsToScan.push(String(params.book_query));
-  if (params?.video_query) textsToScan.push(String(params.video_query));
-
-  // 2) domain-specific params where topics often live
-  if (params?.genre) textsToScan.push(String(params.genre));
-  if (params?.genre_video) textsToScan.push(String(params.genre_video));
-  if (params?.category) textsToScan.push(String(params.category));
-  if (params?.topic) textsToScan.push(String(params.topic));
-
-  // 3) also include the normalized genres derived earlier
-  if (rawBook) textsToScan.push(String(rawBook));
-  if (rawVideo) textsToScan.push(String(rawVideo));
-
-  // 4) (optional) tag name, just in case you ever encode topics in tags
-  if (rawTag) textsToScan.push(String(rawTag));
-  if (tagKey) textsToScan.push(String(tagKey));
-
-  const scanText = textsToScan
-    .map(t => String(t || "").trim())
-    .filter(Boolean)
-    .join(" ")
-    .slice(0, 500); // avoid scanning huge blobs
-
-  if (scanText) {
-    let role = "child";
-
-    // Default preset restrictions (always on)
-    let userSpecific: string[] = [];
-
-    if (userId) {
-      const userSnap = await db.collection("users").doc(userId).get();
-      role = (userSnap.get("role") as string) || "child";
-
-      // restrictions[] field on users/{userId}
-      const r = userSnap.get("restrictions");
-      if (Array.isArray(r)) userSpecific = r;
-
-      // OPTIONAL: if you already have a separate Firestore collection
-      // for restrictions, merge it too (uncomment and adjust collection name):
-      //
-      // const presetSnap = await db.collection("restrictions").doc(userId).get();
-      // const extra = presetSnap.get("terms");
-      // if (Array.isArray(extra)) userSpecific.push(...extra);
-    }
-
-    // Merge default preset + Firestore restrictions
-    const mergedRestrictions = Array.from(
-      new Set(
-        [
-          ...DEFAULT_RESTRICTED_TERMS,
-          ...userSpecific,
-        ]
-          .map(s => String(s).toLowerCase().trim())
-          .filter(Boolean)
-      )
-    );
-
-    const hits = findRestrictedTerms(scanText, mergedRestrictions);
-
-    logger.info("GUARD_CHECK", {
-      userId: userId || null,
-      role,
-      restrictionCount: mergedRestrictions.length,
-      sampleText: scanText.slice(0, 60),
-      sampleHits: hits.slice(0, 3),
-    });
-
-    if (role === "child" && hits.length) {
-      if (userId) {
-        await db.collection("safety_logs").add({
-          userId,
-          hits,
-          ts: new Date(),
-          messagePreview: scanText.slice(0, 160),
-          source: "preset+user",   // helpful for debugging later
+    /* ----------- safety & restrictions (runs whenever userId or text) ----------- */
+    try {
+      if (rawUtterance) {
+        let role = "child";
+        let restrictions: string[] = [];
+        if (userId) {
+          const userSnap = await db.collection("users").doc(userId).get();
+          role = (userSnap.get("role") as string) || "child";
+          restrictions = userSnap.get("restrictions") || [];
+        }
+        const hits = findRestrictedTerms(rawUtterance, restrictions);
+        logger.info("GUARD_CHECK", {
+          userId: userId || null,
+          role, restrictionCount: restrictions.length,
+          sampleText: rawUtterance.slice(0, 60),
+          sampleHits: hits.slice(0, 3),
         });
+        if (role === "child" && hits.length) {
+          if (userId) {
+            await db.collection("safety_logs").add({
+              userId, hits, ts: new Date(), messagePreview: rawUtterance.slice(0, 160),
+            });
+          }
+          reply(res, "Hey there! I can’t help with that topic. Want to explore fun science books, animal stories, or math videos instead? 🐼🚀📚", { algo_used: "guard_block" });
+          return;
+        }
       }
-
-      reply(
-        res,
-        "Hey there! I can’t help with that topic. Want to explore fun science books, animal stories, or math videos instead? 🐼🚀📚",
-        { algo_used: "guard_block" }
-      );
-      return;
+    } catch (e) {
+      logger.warn("moderation guard error", String(e));
+      // fail-open
     }
-  }
-} catch (e) {
-  logger.warn("moderation guard error", String(e));
-  // fail-open (still have API-level safety and kid-friendly queries)
-}
 
     // convenience: kind from intent
     const forcedType: "book" | "video" | undefined =
@@ -1982,69 +1808,6 @@ if (preferPersonal && (!seed || !seed.trim() || blockAnn) && categoryOrTopic) {
       }
 
       const haveFree = !!bookPath;
-
-            // --- EXTRA SAFETY GUARD: block restricted topics for books (child role) ---
-      try {
-        let role = "child";
-        let userSpecific: string[] = [];
-
-        if (userId) {
-          const snap = await db.collection("users").doc(userId).get();
-          role = (snap.get("role") as string) || "child";
-          const r = snap.get("restrictions");
-          if (Array.isArray(r)) userSpecific = r;
-        }
-
-        const parts: string[] = [];
-
-        // what the kid actually typed
-        if (rawUtterance) parts.push(rawUtterance);
-
-        // book-related query bits
-        if (freeBookQuery) parts.push(freeBookQuery);
-        if (rawBook) parts.push(rawBook);
-        if (bookCanon) parts.push(bookCanon);
-        if (params?.category) parts.push(String(params.category));
-
-        const searchText = parts
-          .map(t => String(t || "").toLowerCase().trim())
-          .filter(Boolean)
-          .join(" ")
-          .slice(0, 500);
-
-        if (role === "child" && searchText) {
-          const mergedRestrictions = Array.from(
-            new Set(
-              [...DEFAULT_RESTRICTED_TERMS, ...userSpecific]
-                .map(s => String(s).toLowerCase().trim())
-                .filter(Boolean),
-            ),
-          );
-
-          // simple substring match on all restricted terms
-          const hits = mergedRestrictions.filter(term => term && searchText.includes(term));
-
-          if (hits.length > 0) {
-            logger.info("GUARD_BLOCK_BOOKS", {
-              userId: userId || null,
-              role,
-              searchTextSample: searchText.slice(0, 120),
-              sampleHits: hits.slice(0, 5),
-            });
-
-            reply(
-              res,
-              "I can’t help with that topic. Try asking for animals, science, mystery or other fun kids’ books instead! 🐼🚀📚",
-              { algo_used: "guard_block" },
-            );
-            return;
-          }
-        }
-      } catch (e) {
-        logger.warn("BOOK_GUARD_ERROR", String(e));
-      }
-      // --- END EXTRA SAFETY GUARD ---
-
       if (!bookCanon && !haveFree) {
         reply(res, PROMPT_BOOKS, { algo_used: "category_prompt", mode });
         return;
@@ -2240,10 +2003,7 @@ if (preferPersonal && (!seed || !seed.trim() || blockAnn) && categoryOrTopic) {
 
     // default welcome
     reply(res, WELCOME_LINE, { algo_used: "welcome", mode });
-  } finally {
-    clearTimeout(timeoutHandle);
   }
-}
 );
 
 /* =================== EMBEDDING + ANN (Postgres + pgvector) =================== */

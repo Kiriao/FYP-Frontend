@@ -27,8 +27,6 @@ type PoolVal = { ts: number; items: BookRec[]; approxTotal: number };
 const POOL_TTL_MS = 10 * 60 * 1000; // 10 min
 const poolCache = new Map<string, PoolVal>();
 
-const BLOCKED_BOOK_TERMS = /\b(sex|sexual|porn|xxx|naked|nudity|erotic|bdsm|fetish|gun|guns|shooting|rifle|pistol|shotgun|bomb|explosive|murder|killer|killing|homicide|gore|gory|torture|rape|rapist|drug|drugs|cocaine|heroin|meth|ecstasy|weed|marijuana|cartel|gang|gangs|gangster|mafia|mob|18\+|nsfw)\b/i;
-
 function poolGet(key: string): PoolVal | null {
   const hit = poolCache.get(key);
   if (!hit) return null;
@@ -139,7 +137,6 @@ function toRec(v: any, includeYA: boolean): BookRec | null {
   const buckets = assignBuckets(catsLC, textAllLC);
   const kidSafe = (info.maturityRating || "NOT_MATURE") === "NOT_MATURE";
   if (!kidSafe) return null;
-    if (BLOCKED_BOOK_TERMS.test(textAllLC)) return null;
   if (!includeYA && Array.isArray(buckets) && buckets.includes("young_adult")) return null;
 
   // strip HTML that Google Books sometimes includes
