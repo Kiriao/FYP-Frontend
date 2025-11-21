@@ -653,6 +653,11 @@ function reply(res: any, text: string, extras: Record<string, any> = {}, payload
     ? (extras as any).userId
     : ((globalThis as any).__kidflix_userId as string | null) || undefined;
 
+    const extrasWithUser: Record<string, any> = { ...extras };
+    if (resolvedUserId) {
+      extrasWithUser.userId = resolvedUserId;
+    }
+
     // choose what we store (keep it small)
     const toStore: Record<string, any> = {
       userId: resolvedUserId,
@@ -674,7 +679,18 @@ function reply(res: any, text: string, extras: Record<string, any> = {}, payload
 
     // fire & forget
     saveThreadState(u, sessionId, pruned).catch(() => {});
-  } catch {}
+
+    const messages: any[] = [{ text: { text: [text] } }];
+    if (payload) messages.push({ payload });
+
+    res.status(200).json({
+      fulfillment_response: { messages },
+      sessionInfo: { parameters: extrasWithUser }
+    });
+    return;
+  } catch (e) {
+    logger.warn("REPLY_STATE_ERR", String(e));
+  }
 
   const messages: any[] = [{ text: { text: [text] } }];
   if (payload) messages.push({ payload });
