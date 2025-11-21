@@ -24,6 +24,63 @@ const RECOMMENDER_URL =
   process.env.RECOMMENDER_URL ||
   "https://asia-southeast1-kidflix-4cda0.cloudfunctions.net/recommendForUser";
 
+// --------- Default safety blocklist (applies to all child chats) ---------
+const DEFAULT_RESTRICTED_TERMS: string[] = [
+  "sex",
+  "sexual",
+  "porn",
+  "porno",
+  "pornography",
+  "xxx",
+  "naked",
+  "nudity",
+  "erotic",
+  "bdsm",
+  "fetish",
+  "rape",
+  "rapist",
+  "nsfw",
+  "18+",
+  "adult content",
+  "strip",
+  "stripping",
+
+  "gun",
+  "guns",
+  "weapon",
+  "weapons",
+  "shooting",
+  "rifle",
+  "pistol",
+  "shotgun",
+  "bomb",
+  "explosive",
+
+  "murder",
+  "killer",
+  "killing",
+  "homicide",
+  "gore",
+  "gory",
+  "torture",
+  "beheading",
+
+  "drug",
+  "drugs",
+  "cocaine",
+  "heroin",
+  "meth",
+  "ecstasy",
+  "weed",
+  "marijuana",
+
+  "gang",
+  "gangs",
+  "gangster",
+  "mafia",
+  "cartel"
+];
+
 /* -------------------------------- helpers --------------------------------- */
 function isKnownGenreTerm(s?: string) {
   if (!s) return false;
@@ -797,37 +854,65 @@ const freeVideoQuery =
     const ageGroup = params.age_group || mapAgeToGroup(rawAge);
     const lang = String(params.language ?? "en");
 
-    /* ----------- safety & restrictions (runs whenever userId or text) ----------- */
-    try {
-      if (rawUtterance) {
-        let role = "child";
-        let restrictions: string[] = [];
-        if (userId) {
-          const userSnap = await db.collection("users").doc(userId).get();
-          role = (userSnap.get("role") as string) || "child";
-          restrictions = userSnap.get("restrictions") || [];
-        }
-        const hits = findRestrictedTerms(rawUtterance, restrictions);
-        logger.info("GUARD_CHECK", {
-          userId: userId || null,
-          role, restrictionCount: restrictions.length,
-          sampleText: rawUtterance.slice(0, 60),
-          sampleHits: hits.slice(0, 3),
-        });
-        if (role === "child" && hits.length) {
-          if (userId) {
-            await db.collection("safety_logs").add({
-              userId, hits, ts: new Date(), messagePreview: rawUtterance.slice(0, 160),
-            });
-          }
-          reply(res, "Hey there! I can’t help with that topic. Want to explore fun science books, animal stories, or math videos instead? 🐼🚀📚", { algo_used: "guard_block" });
-          return;
-        }
-      }
-    } catch (e) {
-      logger.warn("moderation guard error", String(e));
-      // fail-open
+/* ----------- safety & restrictions (runs whenever userId or text) ----------- */
+try {
+  if (rawUtterance) {
+    let role = "child";
+
+    // Start with default preset restrictions (always on)
+    let userSpecific: string[] = [];
+    if (userId) {
+      const userSnap = await db.collection("users").doc(userId).get();
+      role = (userSnap.get("role") as string) || "child";
+      const r = userSnap.get("restrictions");
+      userSpecific = Array.isArray(r) ? r : [];
     }
+
+    // Merge defaults + user/parent-configured restrictions
+    const mergedRestrictions = Array.from(
+      new Set(
+        [
+          ...DEFAULT_RESTRICTED_TERMS,
+          ...userSpecific
+        ]
+          .map(s => String(s).toLowerCase().trim())
+          .filter(Boolean)
+      )
+    );
+
+    const hits = findRestrictedTerms(rawUtterance, mergedRestrictions);
+
+    logger.info("GUARD_CHECK", {
+      userId: userId || null,
+      role,
+      restrictionCount: mergedRestrictions.length,
+      sampleText: rawUtterance.slice(0, 60),
+      sampleHits: hits.slice(0, 3),
+    });
+
+    if (role === "child" && hits.length) {
+      if (userId) {
+        await db.collection("safety_logs").add({
+          userId,
+          hits,
+          ts: new Date(),
+          messagePreview: rawUtterance.slice(0, 160),
+          source: "preset+user",   // helpful for debugging later
+        });
+      }
+
+      reply(
+        res,
+        "Hey there! I can’t help with that topic. Want to explore fun science books, animal stories, or math videos instead? 🐼🚀📚",
+        { algo_used: "guard_block" }
+      );
+      return;
+    }
+  }
+} catch (e) {
+  logger.warn("moderation guard error", String(e));
+  // fail-open (but still protected by books/videos filters + APIs' own safety)
+}
 
     // convenience: kind from intent
     const forcedType: "book" | "video" | undefined =

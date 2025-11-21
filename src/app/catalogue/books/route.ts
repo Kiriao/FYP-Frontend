@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 const BOOKS_API_KEY = process.env.BOOKS_API_KEY || "";
 
+const BLOCKED_BOOK_TERMS = /\b(sex|sexual|porn|xxx|naked|nudity|erotic|bdsm|fetish|gun|guns|shooting|rifle|pistol|shotgun|bomb|explosive|murder|killer|killing|homicide|gore|gory|torture|rape|rapist|drug|drugs|cocaine|heroin|meth|ecstasy|weed|marijuana|cartel|gang|gangs|gangster|mafia|mob|18\+|nsfw)\b/i;
+
 function variantsFor(q: string) {
   const parts = q.split(/\s+/).filter(Boolean);
   const vs = new Set([q]);
@@ -122,6 +124,9 @@ export async function GET(req: NextRequest) {
           const rawCats = Array.isArray(info.categories) ? info.categories : [];
           const textAllLC = `${(info.title || "").toLowerCase()} ${(info.subtitle || "").toLowerCase()} ${(info.description || "").toLowerCase()}`;
           const buckets = assignBuckets(rawCats, textAllLC);
+
+          // extra hard filter for obviously adult/violent themes
+          if (BLOCKED_BOOK_TERMS.test(textAllLC)) continue;
 
           const kidSafe = (info.maturityRating || "NOT_MATURE") === "NOT_MATURE";
           if (!kidSafe) continue;
