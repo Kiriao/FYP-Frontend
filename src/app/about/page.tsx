@@ -16,7 +16,7 @@ export default function AboutPage() {
             Our mission is to provide safe, age-appropriate, and fun content
             that helps kids learn and grow in a secure online space.
           </p>
-        </div>
+        </div> 
 
         {/* Our Story */}
         <div className="text-left mb-12">
